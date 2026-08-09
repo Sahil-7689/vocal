@@ -1,6 +1,10 @@
+import { PoolClient } from "pg";
 import { handleLLMCall, LLMStepConfig } from "./handlers/llm";
 import { handleHttpRequest, HTTPStepConfig } from "./handlers/http";
 import { handleConditionalBranch, ConditionalStepConfig } from "./handlers/conditional";
+import { handleApprovalGate, ApprovalStepConfig } from "./handlers/approval";
+import { handleDbWrite, DBWriteStepConfig } from "./handlers/dbWrite";
+import { handleNotify, NotifyStepConfig } from "./handlers/notify";
 
 export interface WorkflowStep {
   id: string;
@@ -22,11 +26,14 @@ export interface StepExecutionResult {
 
 /**
  * Step Dispatcher — modular routing for each step type.
- * Adding future step types (approval_gate, db_write, notify) requires only extending this dispatcher.
+ * Supports llm_call, http_request, conditional_branch, approval_gate, db_write, notify.
  */
 export async function executeStep(
   step: WorkflowStep,
-  context: Record<string, any>
+  context: Record<string, any>,
+  dbClient?: PoolClient,
+  orgId?: string,
+  runId?: string
 ): Promise<StepExecutionResult> {
   const stepType = step.type;
 
@@ -58,25 +65,31 @@ export async function executeStep(
         break;
       }
 
-      // Extension Points for Phase 4 (approval_gate, db_write, notify)
-      case "approval_gate":
+      case "approval_gate": {
+        const res = await handleApprovalGate(step.config as ApprovalStepConfig);
         return {
           stepId: step.id,
           type: stepType,
           status: "paused",
-          output: { paused: true, reason: "Approval Gate reached." },
+          output: res,
           attempts: 1,
         };
+      }
 
-      case "db_write":
-      case "notify":
-        return {
-          stepId: step.id,
-          type: stepType,
-          status: "completed",
-          output: { message: `Step type ${stepType} handler reserved for Phase 4.` },
-          attempts: 1,
-        };
+      case "db_write": {
+        if (!dbClient || !orgId || !runId) {
+          throw new Error("db_write step requires database client and execution context.");
+        }
+        const res = await handleDbWrite(dbClient, orgId, runId, step.config as DBWriteStepConfig, context);
+        output = res;
+        break;
+      }
+
+      case "notify": {
+        const res = await handleNotify(step.config as NotifyStepConfig, context);
+        output = res;
+        break;
+      }
 
       default:
         throw new Error(`Unsupported step type: '${stepType}'.`);

@@ -1,14 +1,7 @@
 import { Request, Response } from "express";
 import { Pool } from "pg";
-import {
-  incrementOrgQuota,
-  executeDbWrite,
-  executeNotify,
-  executeLLMCall,
-  executeHttpRequest,
-  executeConditional,
-  WorkflowStep,
-} from "../_shared/workflowEngine";
+import { executeStep, WorkflowStep } from "../_shared/executor";
+import { incrementOrgQuota } from "../_shared/workflowEngine";
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL || "postgres://postgres:postgres@localhost:5432/vocalflow",
@@ -16,9 +9,9 @@ const pool = new Pool({
 
 export default async function handleApproveStep(req: Request, res: Response) {
   // ---------------------------------------------------------------
-  // Layer 1: Extract and validate authenticated user identity
-  // The header is set by Hasura from the Nhost JWT — never trust
-  // anything the client sends as user_id in the body.
+  // Layer 1: Extract authenticated user identity
+  // Must come from X-Hasura-User-Id header set by Hasura from JWT.
+  // Never trust user_id, org_id, or role from the request body.
   // ---------------------------------------------------------------
   const userId = (
     req.headers["x-hasura-user-id"] ||
@@ -38,10 +31,7 @@ export default async function handleApproveStep(req: Request, res: Response) {
 
   try {
     // ---------------------------------------------------------------
-    // Layer 1: Verify org membership
-    // The JOIN on org_members.user_id = userId ensures:
-    //   - The caller belongs to the org that owns this workflow
-    //   - An Org B user can never approve an Org A step run
+    // Layer 1 Authorization: Verify org membership via JOIN
     // ---------------------------------------------------------------
     const queryRes = await client.query(
       `SELECT
@@ -65,8 +55,6 @@ export default async function handleApproveStep(req: Request, res: Response) {
     );
 
     if (queryRes.rows.length === 0) {
-      // Either the step run doesn't exist or the caller isn't a member
-      // of the org that owns it. Return 403 — don't reveal which case.
       return res.status(403).json({
         message: "Forbidden: Step run not found or access denied.",
       });
@@ -83,9 +71,7 @@ export default async function handleApproveStep(req: Request, res: Response) {
       user_role:        userRole,
     } = queryRes.rows[0];
 
-    // ---------------------------------------------------------------
-    // State validation: step must be an approval_gate and paused
-    // ---------------------------------------------------------------
+    // State Validation
     if (stepType !== "approval_gate") {
       return res.status(400).json({
         message: `Bad Request: Step is not an approval_gate (type: ${stepType}).`,
@@ -99,15 +85,7 @@ export default async function handleApproveStep(req: Request, res: Response) {
     }
 
     // ---------------------------------------------------------------
-    // Layer 2: Approval gate role check
-    // This CANNOT be a simple database permission because it is a
-    // runtime decision evaluated mid-execution against the gate's
-    // config.required_role field.
-    //
-    // Rules:
-    //   required_role = "owner"  → only owner can approve
-    //   required_role = "editor" → owner or editor can approve
-    //   viewers can never approve any gate
+    // Layer 2: Runtime Approver Role Check against step config
     // ---------------------------------------------------------------
     const requiredRole: string = stepConfig?.required_role || "owner";
 
@@ -123,11 +101,8 @@ export default async function handleApproveStep(req: Request, res: Response) {
       });
     }
 
-    // At this point: caller is owner (always allowed) OR
-    // requiredRole is editor and caller is editor (allowed).
-
     // ---------------------------------------------------------------
-    // Mark the approval gate step_run as approved + completed
+    // Mark approval_gate step_run as completed with approval audit fields
     // ---------------------------------------------------------------
     await client.query(
       `UPDATE public.step_runs
@@ -145,7 +120,7 @@ export default async function handleApproveStep(req: Request, res: Response) {
     );
 
     // ---------------------------------------------------------------
-    // Resume execution of remaining steps (position > this gate)
+    // Resume execution of remaining steps AFTER approval gate (position > stepPosition)
     // ---------------------------------------------------------------
     const remainingStepsRes = await client.query(
       `SELECT id, workflow_id, position, name, type, config
@@ -170,74 +145,41 @@ export default async function handleApproveStep(req: Request, res: Response) {
       );
       const newStepRunId = stepRunRes.rows[0].id;
 
-      try {
-        let output: any = null;
+      const context = { previousOutput: prevOutput, stepConfig: step.config };
+      const stepResult = await executeStep(step, context, client, orgId, runId);
 
-        if (step.type === "llm_call") {
-          output = await executeLLMCall(step.config, { input: prevOutput });
-        } else if (step.type === "http_request") {
-          output = await executeHttpRequest(step.config, { input: prevOutput });
-        } else if (step.type === "conditional_branch") {
-          output = await executeConditional(step.config, prevOutput);
-        } else if (step.type === "approval_gate") {
-          // Another gate encountered — pause again and stop
-          await client.query(
-            `UPDATE public.step_runs SET status = 'paused' WHERE id = $1`,
-            [newStepRunId]
-          );
-          await client.query(
-            `UPDATE public.workflow_runs SET status = 'paused' WHERE id = $1`,
-            [runId]
-          );
-          pausedAgain = true;
-          break;
-        } else if (step.type === "db_write") {
-          output = await executeDbWrite(client, orgId, runId, step.config);
-        } else if (step.type === "notify") {
-          output = await executeNotify(step.config, { input: prevOutput });
-        }
-
+      if (stepResult.status === "paused") {
+        await client.query(`UPDATE public.step_runs SET status = 'paused' WHERE id = $1`, [newStepRunId]);
+        await client.query(`UPDATE public.workflow_runs SET status = 'paused' WHERE id = $1`, [runId]);
+        pausedAgain = true;
+        break;
+      } else if (stepResult.status === "failed") {
         await client.query(
-          `UPDATE public.step_runs
-           SET status = 'completed', output = $1, completed_at = now()
-           WHERE id = $2`,
-          [JSON.stringify(output), newStepRunId]
-        );
-
-        prevOutput = output;
-      } catch (stepErr: any) {
-        await client.query(
-          `UPDATE public.step_runs
-           SET status = 'failed', error = $1, completed_at = now()
-           WHERE id = $2`,
-          [stepErr.message, newStepRunId]
+          `UPDATE public.step_runs SET status = 'failed', error = $1, attempt_count = $2, completed_at = now() WHERE id = $3`,
+          [stepResult.error, stepResult.attempts, newStepRunId]
         );
         await client.query(
-          `UPDATE public.workflow_runs
-           SET status = 'failed', error = $1, completed_at = now()
-           WHERE id = $2`,
-          [stepErr.message, runId]
+          `UPDATE public.workflow_runs SET status = 'failed', error = $1, completed_at = now() WHERE id = $2`,
+          [stepResult.error, runId]
         );
         executionFailed = true;
         break;
+      } else {
+        await client.query(
+          `UPDATE public.step_runs SET status = 'completed', output = $1, attempt_count = $2, completed_at = now() WHERE id = $3`,
+          [JSON.stringify(stepResult.output), stepResult.attempts, newStepRunId]
+        );
+        prevOutput = stepResult.output;
       }
     }
 
-    // Mark workflow completed and increment quota if fully done
+    // Mark workflow completed if finished without pausing or failing
     if (!pausedAgain && !executionFailed) {
-      const runCheck = await client.query(
-        `SELECT status FROM public.workflow_runs WHERE id = $1`,
-        [runId]
+      await client.query(
+        `UPDATE public.workflow_runs SET status = 'completed', output = $1, completed_at = now() WHERE id = $2`,
+        [JSON.stringify(prevOutput), runId]
       );
-      if (runCheck.rows[0]?.status === "running") {
-        await client.query(
-          `UPDATE public.workflow_runs
-           SET status = 'completed', completed_at = now()
-           WHERE id = $1`,
-          [runId]
-        );
-        await incrementOrgQuota(client, orgId);
-      }
+      await incrementOrgQuota(client, orgId);
     }
 
     return res.json({
@@ -245,7 +187,7 @@ export default async function handleApproveStep(req: Request, res: Response) {
       status: pausedAgain ? "paused" : executionFailed ? "failed" : "completed",
     });
   } catch (err: any) {
-    console.error("[approveStep] Unexpected error:", err);
+    console.error("[approveStep] Error:", err);
     return res.status(500).json({ message: err.message || "Internal server error." });
   } finally {
     client.release();

@@ -100,7 +100,7 @@ export default async function handleTriggerWorkflowRun(req: Request, res: Respon
 
       // Dispatch step execution to modular handlers (with retry logic)
       const context = { input, previousOutput: prevOutput, stepConfig: step.config };
-      const stepResult = await executeStep(step, context);
+      const stepResult = await executeStep(step, context, client, orgId, runId);
 
       if (stepResult.status === "paused") {
         await pool.query(

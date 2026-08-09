@@ -204,7 +204,10 @@ describe("Phase 3 — Modular Workflow Execution Engine Test Suite", () => {
         type: "db_write",
         config: {},
       };
-      const dbRes = await executeStep(dbStep, {});
+      const mockDbClient: any = {
+        query: async () => ({ rows: [{ id: "res-test-100", created_at: new Date().toISOString() }] }),
+      };
+      const dbRes = await executeStep(dbStep, {}, mockDbClient, "org-1", "run-1");
       expect(dbRes.status).toBe("completed");
     });
   });
