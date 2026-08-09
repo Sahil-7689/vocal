@@ -1,48 +1,74 @@
 # ============================================================
-# VocalFlow Hasura Permissions — Two-Layer Security Model
+# VocalFlow — Hasura Row-Level Permissions
+# Two-Layer Security Model
 # ============================================================
 #
-# LAYER 1: Org + Role Scoping (Who can see or touch data)
-# -------------------------------------------------------
-# Every filter chains through org_members to the caller's own
-# org. An editor in Org A can never see Org B data even if
-# they have the same role label.
+# LAYER 1 — Org + Role Scoping
+# ─────────────────────────────
+# Every permission filter chains through org_members.
+# The authenticated identity comes exclusively from X-Hasura-User-Id
+# (set by Nhost JWT — client cannot forge this).
 #
-# LAYER 2: Step-Level Gating (Who can act on specific steps)
-# ----------------------------------------------------------
-# Restricted step types (db_write, notify, webhook trigger)
-# are blocked at the database INSERT permission level for editors.
-# approval_gate clearance is enforced in the Action handler
-# (approve-step/index.ts) because it is a mid-execution runtime
-# decision — not a simple row write.
+# The invariant is:
+#   resource.org_id → org_members.org_id → org_members.user_id = X-Hasura-User-Id
+#
+# This ensures an editor in Org A can NEVER read or write Org B data
+# even if they know the UUID.
+#
+# LAYER 2 — Step-Level Gating
+# ────────────────────────────
+# Certain operations are privileged because they reach outside the
+# workflow sandbox. These are enforced at INSERT/UPDATE check time:
+#
+#   db_write step    → owner only   (enforced via type _nin on editor INSERT)
+#   notify step      → owner only   (same)
+#   webhook trigger  → owner only   (enforced via type _neq on editor INSERT)
+#
+# approval_gate clearance is NOT a database permission — it is a
+# runtime decision inside the approveStep Action handler, because
+# it depends on mid-execution state (step_config.required_role).
+#
+# Role matrix implemented:
+#
+#   Operation              | owner | editor | viewer
+#   ─────────────────────────────────────────────────
+#   View own-org workflows |   ✅  |   ✅   |   ✅
+#   Create workflow        |   ✅  |   ✅   |   ❌
+#   Edit workflow          |   ✅  |   ✅   |   ❌
+#   Delete workflow        |   ✅  |   ✅   |   ❌
+#   Create normal step     |   ✅  |   ✅   |   ❌
+#   Add db_write           |   ✅  |   ❌   |   ❌
+#   Add notify             |   ✅  |   ❌   |   ❌
+#   Create webhook trigger |   ✅  |   ❌   |   ❌
+#   Trigger workflow       |   ✅  |   ✅   |   ❌  (Action)
+#   View runs              |   ✅  |   ✅   |   ✅
+#   Manage members         |   ✅  |   ❌   |   ❌
+#   Approve gate           |   ✅  |   ❌   |   ❌  (Action, owner-only)
+#   Access another org     |   ❌  |   ❌   |   ❌
 # ============================================================
 
 table_permissions:
 
-  # ----------------------------------------------------------
-  # org_members
-  # ----------------------------------------------------------
-  # A user can only read their own membership rows.
-  # Owners can see all memberships within their org (for
-  # the member management UI). Editors/Viewers see only themselves.
-  # Nobody can directly insert/update/delete memberships —
-  # that is handled exclusively by the createOrganization Action.
-  # ----------------------------------------------------------
+  # ── org_members ────────────────────────────────────────────────
+  # LAYER 1: Users may only read memberships in orgs they belong to.
+  # Owner sees all org members (for member management UI).
+  # Editor/Viewer see only their own membership row.
+  # No client can INSERT/UPDATE/DELETE memberships — that is handled
+  # exclusively by the createOrganization Action (owner assignment)
+  # and future inviteUser / removeUser Actions.
+  # ───────────────────────────────────────────────────────────────
   org_members:
     select:
       - role: owner
         permission:
-          # Owner sees all members in orgs they belong to
+          # Owner sees all members in their org(s).
+          # Chain: org_members.org_id → organizations → members
+          # Filter: orgs where the caller is also a member
           filter:
-            org_id:
-              _in:
-                # Sub-select: orgs where THIS user is a member
-                _select:
-                  table: org_members
-                  column: org_id
-                  where:
-                    user_id:
-                      _eq: X-Hasura-User-Id
+            organization:
+              members:
+                user_id:
+                  _eq: X-Hasura-User-Id
       - role: editor
         permission:
           # Editor sees only their own membership row
@@ -56,15 +82,13 @@ table_permissions:
             user_id:
               _eq: X-Hasura-User-Id
 
-  # ----------------------------------------------------------
-  # organizations
-  # ----------------------------------------------------------
-  # A user may read only the organizations they are a member of,
-  # regardless of knowing the UUID. The filter traverses the
-  # org_members relationship to enforce this at the database layer.
-  # Only owners can update organization settings.
-  # Nobody can delete an org via GraphQL (admin-only operation).
-  # ----------------------------------------------------------
+  # ── organizations ──────────────────────────────────────────────
+  # LAYER 1: A user may only read orgs where they are a member.
+  # Even knowing the UUID of another org returns 0 rows.
+  # Only owners can update org settings (name).
+  # quota_allowed and quota_used are server-controlled — not in columns.
+  # No role can delete an org via GraphQL (admin-only).
+  # ───────────────────────────────────────────────────────────────
   organizations:
     select:
       - role: owner
@@ -94,15 +118,16 @@ table_permissions:
                 _eq: X-Hasura-User-Id
           columns:
             - name
-          # quota_allowed and quota_used are server-controlled only
 
-  # ----------------------------------------------------------
-  # workflows
-  # ----------------------------------------------------------
-  # Layer 1: All three roles can SELECT only their org's workflows
-  # Layer 2 insert/update: owner + editor — no role difference here
-  # Layer 2 delete: owner only
-  # ----------------------------------------------------------
+  # ── workflows ──────────────────────────────────────────────────
+  # LAYER 1:
+  #   SELECT — all three roles see only their own org's workflows
+  #   INSERT — owner + editor only
+  #   UPDATE — owner + editor only
+  #   DELETE — owner + editor (assignment: editor can delete)
+  #
+  # Note: viewer has no INSERT, UPDATE, or DELETE permission.
+  # ───────────────────────────────────────────────────────────────
   workflows:
     select:
       - role: owner
@@ -187,20 +212,28 @@ table_permissions:
               members:
                 user_id:
                   _eq: X-Hasura-User-Id
-      # editors and viewers cannot delete workflows
+      # LAYER 1: Editor can also delete workflows (assignment requirement)
+      - role: editor
+        permission:
+          filter:
+            organization:
+              members:
+                user_id:
+                  _eq: X-Hasura-User-Id
+      # viewer: no delete permission
 
-  # ----------------------------------------------------------
-  # workflow_steps
-  # ----------------------------------------------------------
-  # Layer 1: All roles can SELECT steps in their org's workflows
-  # Layer 2 insert:
-  #   owner — unrestricted (can add db_write, notify, any type)
+  # ── workflow_steps ─────────────────────────────────────────────
+  # LAYER 1:
+  #   SELECT — all three roles see only steps in their org's workflows
+  #   INSERT — owner + editor; viewer: denied
+  #   UPDATE — owner + editor; viewer: denied
+  #   DELETE — owner + editor; viewer: denied
+  #
+  # LAYER 2 (INSERT check):
+  #   owner  — unrestricted (can add db_write, notify, any type)
   #   editor — blocked from inserting db_write or notify step types
-  #            (also cannot add webhook trigger — enforced in
-  #            workflow_triggers insert permission below)
-  # Layer 2 update: owner + editor can update step config
-  # Layer 2 delete: owner only
-  # ----------------------------------------------------------
+  #            (type _nin enforced at INSERT and UPDATE check time)
+  # ───────────────────────────────────────────────────────────────
   workflow_steps:
     select:
       - role: owner
@@ -252,7 +285,7 @@ table_permissions:
                     members:
                       user_id:
                         _eq: X-Hasura-User-Id
-              # LAYER 2: Editors cannot add db_write or notify steps
+              # ── LAYER 2: block db_write and notify for editors ──
               - type:
                   _nin: ["db_write", "notify"]
           columns:
@@ -285,7 +318,7 @@ table_permissions:
                     members:
                       user_id:
                         _eq: X-Hasura-User-Id
-              # LAYER 2: Editor cannot change a step to a restricted type
+              # ── LAYER 2: editor cannot change a step to a restricted type
               - type:
                   _nin: ["db_write", "notify"]
           columns:
@@ -303,17 +336,27 @@ table_permissions:
                 members:
                   user_id:
                     _eq: X-Hasura-User-Id
+      # LAYER 1: Editor can delete steps (assignment requirement)
+      - role: editor
+        permission:
+          filter:
+            workflow:
+              organization:
+                members:
+                  user_id:
+                    _eq: X-Hasura-User-Id
+      # viewer: no delete permission
 
-  # ----------------------------------------------------------
-  # workflow_triggers
-  # ----------------------------------------------------------
-  # Layer 1: All roles SELECT only their org's triggers
-  # Layer 2 insert:
-  #   owner — unrestricted (can add webhook triggers)
-  #   editor — cannot add webhook type triggers
-  # Layer 2 update: owner only (trigger config is sensitive)
-  # Layer 2 delete: owner only
-  # ----------------------------------------------------------
+  # ── workflow_triggers ──────────────────────────────────────────
+  # LAYER 1:
+  #   SELECT — all three roles see their org's triggers
+  #   INSERT — owner: unrestricted; editor: blocked from webhook type
+  #   UPDATE — owner only (trigger config is sensitive)
+  #   DELETE — owner only
+  #
+  # LAYER 2 (INSERT check for editor):
+  #   editor cannot create a webhook trigger (type _neq "webhook")
+  # ───────────────────────────────────────────────────────────────
   workflow_triggers:
     select:
       - role: owner
@@ -364,7 +407,7 @@ table_permissions:
                     members:
                       user_id:
                         _eq: X-Hasura-User-Id
-              # LAYER 2: Editors cannot create webhook triggers
+              # ── LAYER 2: editor cannot create webhook triggers ──
               - type:
                   _neq: "webhook"
           columns:
@@ -396,15 +439,14 @@ table_permissions:
                   user_id:
                     _eq: X-Hasura-User-Id
 
-  # ----------------------------------------------------------
-  # workflow_runs
-  # ----------------------------------------------------------
-  # All roles can SELECT runs from their own org's workflows.
-  # Runs are created exclusively by the triggerWorkflowRun Action
-  # (no direct GraphQL insert). The Action handler already enforces
-  # Layer 2 (viewer cannot trigger). No direct insert permission
-  # is granted here to any role — that is intentional.
-  # ----------------------------------------------------------
+  # ── workflow_runs ──────────────────────────────────────────────
+  # LAYER 1: All roles see only runs for their own org's workflows.
+  # No role can directly INSERT a workflow_run — runs are created
+  # exclusively by the triggerWorkflowRun Action, which performs
+  # its own Layer 1 + Layer 2 checks (viewer rejected, org verified).
+  # No role can directly UPDATE or DELETE workflow_runs — all state
+  # transitions (running → paused → completed) happen server-side.
+  # ───────────────────────────────────────────────────────────────
   workflow_runs:
     select:
       - role: owner
@@ -432,14 +474,14 @@ table_permissions:
                   user_id:
                     _eq: X-Hasura-User-Id
 
-  # ----------------------------------------------------------
-  # step_runs
-  # ----------------------------------------------------------
-  # All roles can SELECT step_runs from their own org's workflows.
-  # Step_run updates (status, output, approval fields) are
-  # performed exclusively by the Action handlers — no direct
-  # client write permission is granted.
-  # ----------------------------------------------------------
+  # ── step_runs ──────────────────────────────────────────────────
+  # LAYER 1: All roles see only step_runs for their org's workflows.
+  # No role can directly INSERT, UPDATE, or DELETE step_runs.
+  # All step_run mutations (status, output, approved_by, approved_at)
+  # are performed by Action handlers (triggerWorkflowRun / approveStep).
+  # This prevents the approval bypass attack:
+  #   mutation { update_step_runs(... status: completed approved_by: ...) }
+  # ───────────────────────────────────────────────────────────────
   step_runs:
     select:
       - role: owner
@@ -470,13 +512,11 @@ table_permissions:
                     user_id:
                       _eq: X-Hasura-User-Id
 
-  # ----------------------------------------------------------
-  # workflow_results
-  # ----------------------------------------------------------
-  # All roles can SELECT results from their own org.
-  # Results are written exclusively by the executeDbWrite Action
-  # helper — no client insert permission.
-  # ----------------------------------------------------------
+  # ── workflow_results ───────────────────────────────────────────
+  # LAYER 1: All roles see only results for their own org.
+  # Results are written exclusively by the executeDbWrite helper
+  # inside the triggerWorkflowRun / approveStep Action handlers.
+  # ───────────────────────────────────────────────────────────────
   workflow_results:
     select:
       - role: owner
