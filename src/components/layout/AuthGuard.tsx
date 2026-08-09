@@ -47,8 +47,6 @@ export const AuthGuard: React.FC<{ children: React.ReactNode }> = ({ children })
     }
   }, [isLiveBackend, isLoading, isAuthenticated, hasOrganization, isPublicRoute, pathname, router, mounted]);
 
-  if (!mounted) return null;
-
   // Show loading spinner while Nhost determines authentication session on protected routes
   if (isLiveBackend && isLoading && !isPublicRoute) {
     return (
