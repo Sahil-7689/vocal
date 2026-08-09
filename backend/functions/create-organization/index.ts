@@ -1,79 +1,91 @@
 import { Request, Response } from "express";
-import { Pool } from "pg";
+import { graphqlAdmin } from "../_shared/graphqlAdmin";
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || "postgres://postgres:postgres@localhost:5432/vocalflow",
-});
-
+/**
+ * createOrganization — Hasura Action handler
+ *
+ * Security model:
+ *   - User identity comes from X-Hasura-User-Id header (set by Nhost/Hasura
+ *     from the JWT — the client cannot forge this).
+ *   - The client never supplies user_id or role.
+ *   - Organization + owner membership are created atomically via a
+ *     single GraphQL mutation with admin privileges.
+ *   - Uses Hasura GraphQL API (not direct pg) so it works both locally
+ *     (pointing at the Nhost cloud DB) and when deployed as an Nhost Function.
+ */
 export default async function handleCreateOrganization(req: Request, res: Response) {
   try {
-    // 1. Authenticate user from Hasura / Nhost header
-    const userId = (req.headers["x-hasura-user-id"] || req.body?.session_variables?.["x-hasura-user-id"]) as string;
-    
+    // ── Layer 1: Extract authenticated user from Hasura-injected header ──
+    const userId = (
+      req.headers["x-hasura-user-id"] ||
+      req.body?.session_variables?.["x-hasura-user-id"]
+    ) as string;
+
     if (!userId || userId === "anonymous") {
       return res.status(401).json({
-        message: "Unauthorized: Missing authenticated Nhost user header",
+        message: "Unauthorized: Missing authenticated Nhost user identity.",
       });
     }
 
-    // 2. Parse Organization Name from request body (supports direct body or Hasura Action payload)
-    const orgName = (req.body.name || req.body?.input?.name || "").trim();
+    // ── Parse org name from body (supports both direct and Action payload) ──
+    const orgName = (
+      req.body?.input?.name ||
+      req.body?.name ||
+      ""
+    ).trim();
 
     if (!orgName) {
-      return res.status(400).json({
-        message: "Organization name is required",
-      });
+      return res.status(400).json({ message: "Bad Request: Organization name is required." });
     }
 
-    const client = await pool.connect();
+    // ── Atomically create org + owner membership via admin GraphQL ──
+    // Using insert_organizations with a nested insert_org_members ensures
+    // both records are created in a single transaction. If either fails,
+    // neither is committed.
+    const result = await graphqlAdmin<{
+      insert_organizations_one: {
+        id: string;
+        name: string;
+        created_at: string;
+        members: Array<{ id: string; role: string }>;
+      };
+    }>(
+      `mutation CreateOrganizationWithOwner($name: String!, $userId: uuid!) {
+        insert_organizations_one(object: {
+          name: $name
+          quota_allowed: 100
+          quota_used: 0
+          members: {
+            data: [{
+              user_id: $userId
+              role: "owner"
+            }]
+          }
+        }) {
+          id
+          name
+          created_at
+          members {
+            id
+            role
+          }
+        }
+      }`,
+      { name: orgName, userId }
+    );
 
-    try {
-      await client.query("BEGIN");
+    const newOrg = result.insert_organizations_one;
 
-      // 3. Insert new Organization record
-      const orgRes = await client.query(
-        `INSERT INTO public.organizations (name, quota_allowed, quota_used)
-         VALUES ($1, $2, $3)
-         RETURNING id, name, quota_allowed, quota_used, created_at`,
-        [orgName, 10000, 0]
-      );
-
-      const newOrg = orgRes.rows[0];
-
-      // 4. Atomically insert authenticated user as OWNER in org_members
-      const memberRes = await client.query(
-        `INSERT INTO public.org_members (org_id, user_id, role)
-         VALUES ($1, $2, 'owner')
-         RETURNING id, org_id, user_id, role, created_at`,
-        [newOrg.id, userId]
-      );
-
-      const newMember = memberRes.rows[0];
-
-      await client.query("COMMIT");
-
-      return res.status(200).json({
-        org_id: newOrg.id,
-        name: newOrg.name,
-        user_id: userId,
-        role: "owner",
-        created_at: newOrg.created_at,
-      });
-    } catch (dbErr: any) {
-      await client.query("ROLLBACK");
-      console.error("Database error creating organization:", dbErr);
-      return res.status(500).json({
-        message: "Failed to create organization in database",
-        error: dbErr.message,
-      });
-    } finally {
-      client.release();
-    }
+    return res.status(200).json({
+      org_id: newOrg.id,
+      name: newOrg.name,
+      role: "owner",
+      created_at: newOrg.created_at,
+    });
   } catch (err: any) {
-    console.error("Unexpected error in create-organization:", err);
+    console.error("[createOrganization] Error:", err.message || err);
     return res.status(500).json({
-      message: "Internal server error during organization creation",
-      error: err.message,
+      message: err.message || "Internal server error during organization creation.",
     });
   }
 }
