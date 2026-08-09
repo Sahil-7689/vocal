@@ -18,6 +18,11 @@ export async function loginWithEmailPassword(email: string, password: string) {
   }
 
   try {
+    // If an existing session is present, sign out first so a new user can sign in
+    if (nhost.auth.isAuthenticated()) {
+      await nhost.auth.signOut();
+    }
+
     const res = await nhost.auth.signIn({
       email,
       password,
@@ -43,6 +48,11 @@ export async function signUpWithEmailPassword(email: string, password: string, d
   }
 
   try {
+    // If an existing session is present, sign out first so a new user can register
+    if (nhost.auth.isAuthenticated()) {
+      await nhost.auth.signOut();
+    }
+
     const res = await nhost.auth.signUp({
       email,
       password,
@@ -50,7 +60,25 @@ export async function signUpWithEmailPassword(email: string, password: string, d
         displayName: displayName || email,
       },
     });
+
     if (res.error) {
+      if (
+        res.error.message.toLowerCase().includes("already signed in") ||
+        res.error.message.toLowerCase().includes("already authenticated")
+      ) {
+        await nhost.auth.signOut();
+        const retryRes = await nhost.auth.signUp({
+          email,
+          password,
+          options: {
+            displayName: displayName || email,
+          },
+        });
+        if (retryRes.error) {
+          throw new Error(retryRes.error.message);
+        }
+        return retryRes.session;
+      }
       throw new Error(res.error.message);
     }
     return res.session;
@@ -65,7 +93,7 @@ export async function logoutUser() {
   try {
     await nhost.auth.signOut();
   } catch (err: any) {
-    // Ignore signout errors in local mode
+    // Ignore signout errors
   }
 }
 
