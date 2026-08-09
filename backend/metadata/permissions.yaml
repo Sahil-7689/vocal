@@ -540,3 +540,43 @@ table_permissions:
               members:
                 user_id:
                   _eq: X-Hasura-User-Id
+
+  # ── organization_monthly_usage ─────────────────────────────────
+  # LAYER 1: All roles see monthly usage data for their own org(s).
+  # ───────────────────────────────────────────────────────────────
+  organization_monthly_usage:
+    select:
+      - role: owner
+        permission:
+          filter:
+            org_id:
+              _in:
+                _select:
+                  table: org_members
+                  column: org_id
+                  where:
+                    user_id:
+                      _eq: X-Hasura-User-Id
+      - role: editor
+        permission:
+          filter:
+            org_id:
+              _in:
+                _select:
+                  table: org_members
+                  column: org_id
+                  where:
+                    user_id:
+                      _eq: X-Hasura-User-Id
+      - role: viewer
+        permission:
+          filter:
+            org_id:
+              _in:
+                _select:
+                  table: org_members
+                  column: org_id
+                  where:
+                    user_id:
+                      _eq: X-Hasura-User-Id
+
