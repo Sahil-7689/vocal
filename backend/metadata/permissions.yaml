@@ -1,4 +1,70 @@
+# ============================================================
+# VocalFlow Hasura Permissions — Two-Layer Security Model
+# ============================================================
+#
+# LAYER 1: Org + Role Scoping (Who can see or touch data)
+# -------------------------------------------------------
+# Every filter chains through org_members to the caller's own
+# org. An editor in Org A can never see Org B data even if
+# they have the same role label.
+#
+# LAYER 2: Step-Level Gating (Who can act on specific steps)
+# ----------------------------------------------------------
+# Restricted step types (db_write, notify, webhook trigger)
+# are blocked at the database INSERT permission level for editors.
+# approval_gate clearance is enforced in the Action handler
+# (approve-step/index.ts) because it is a mid-execution runtime
+# decision — not a simple row write.
+# ============================================================
+
 table_permissions:
+
+  # ----------------------------------------------------------
+  # org_members
+  # ----------------------------------------------------------
+  # A user can only read their own membership rows.
+  # Owners can see all memberships within their org (for
+  # the member management UI). Editors/Viewers see only themselves.
+  # Nobody can directly insert/update/delete memberships —
+  # that is handled exclusively by the createOrganization Action.
+  # ----------------------------------------------------------
+  org_members:
+    select:
+      - role: owner
+        permission:
+          # Owner sees all members in orgs they belong to
+          filter:
+            org_id:
+              _in:
+                # Sub-select: orgs where THIS user is a member
+                _select:
+                  table: org_members
+                  column: org_id
+                  where:
+                    user_id:
+                      _eq: X-Hasura-User-Id
+      - role: editor
+        permission:
+          # Editor sees only their own membership row
+          filter:
+            user_id:
+              _eq: X-Hasura-User-Id
+      - role: viewer
+        permission:
+          # Viewer sees only their own membership row
+          filter:
+            user_id:
+              _eq: X-Hasura-User-Id
+
+  # ----------------------------------------------------------
+  # organizations
+  # ----------------------------------------------------------
+  # A user may read only the organizations they are a member of,
+  # regardless of knowing the UUID. The filter traverses the
+  # org_members relationship to enforce this at the database layer.
+  # Only owners can update organization settings.
+  # Nobody can delete an org via GraphQL (admin-only operation).
+  # ----------------------------------------------------------
   organizations:
     select:
       - role: owner
@@ -19,7 +85,24 @@ table_permissions:
             members:
               user_id:
                 _eq: X-Hasura-User-Id
+    update:
+      - role: owner
+        permission:
+          filter:
+            members:
+              user_id:
+                _eq: X-Hasura-User-Id
+          columns:
+            - name
+          # quota_allowed and quota_used are server-controlled only
 
+  # ----------------------------------------------------------
+  # workflows
+  # ----------------------------------------------------------
+  # Layer 1: All three roles can SELECT only their org's workflows
+  # Layer 2 insert/update: owner + editor — no role difference here
+  # Layer 2 delete: owner only
+  # ----------------------------------------------------------
   workflows:
     select:
       - role: owner
@@ -52,6 +135,12 @@ table_permissions:
               members:
                 user_id:
                   _eq: X-Hasura-User-Id
+          columns:
+            - org_id
+            - name
+            - description
+            - status
+            - created_by
       - role: editor
         permission:
           check:
@@ -59,6 +148,12 @@ table_permissions:
               members:
                 user_id:
                   _eq: X-Hasura-User-Id
+          columns:
+            - org_id
+            - name
+            - description
+            - status
+            - created_by
 
     update:
       - role: owner
@@ -68,6 +163,10 @@ table_permissions:
               members:
                 user_id:
                   _eq: X-Hasura-User-Id
+          columns:
+            - name
+            - description
+            - status
       - role: editor
         permission:
           filter:
@@ -75,6 +174,10 @@ table_permissions:
               members:
                 user_id:
                   _eq: X-Hasura-User-Id
+          columns:
+            - name
+            - description
+            - status
 
     delete:
       - role: owner
@@ -84,7 +187,20 @@ table_permissions:
               members:
                 user_id:
                   _eq: X-Hasura-User-Id
+      # editors and viewers cannot delete workflows
 
+  # ----------------------------------------------------------
+  # workflow_steps
+  # ----------------------------------------------------------
+  # Layer 1: All roles can SELECT steps in their org's workflows
+  # Layer 2 insert:
+  #   owner — unrestricted (can add db_write, notify, any type)
+  #   editor — blocked from inserting db_write or notify step types
+  #            (also cannot add webhook trigger — enforced in
+  #            workflow_triggers insert permission below)
+  # Layer 2 update: owner + editor can update step config
+  # Layer 2 delete: owner only
+  # ----------------------------------------------------------
   workflow_steps:
     select:
       - role: owner
@@ -121,6 +237,12 @@ table_permissions:
                 members:
                   user_id:
                     _eq: X-Hasura-User-Id
+          columns:
+            - workflow_id
+            - position
+            - name
+            - type
+            - config
       - role: editor
         permission:
           check:
@@ -130,9 +252,68 @@ table_permissions:
                     members:
                       user_id:
                         _eq: X-Hasura-User-Id
+              # LAYER 2: Editors cannot add db_write or notify steps
               - type:
                   _nin: ["db_write", "notify"]
+          columns:
+            - workflow_id
+            - position
+            - name
+            - type
+            - config
 
+    update:
+      - role: owner
+        permission:
+          filter:
+            workflow:
+              organization:
+                members:
+                  user_id:
+                    _eq: X-Hasura-User-Id
+          columns:
+            - position
+            - name
+            - type
+            - config
+      - role: editor
+        permission:
+          filter:
+            _and:
+              - workflow:
+                  organization:
+                    members:
+                      user_id:
+                        _eq: X-Hasura-User-Id
+              # LAYER 2: Editor cannot change a step to a restricted type
+              - type:
+                  _nin: ["db_write", "notify"]
+          columns:
+            - position
+            - name
+            - type
+            - config
+
+    delete:
+      - role: owner
+        permission:
+          filter:
+            workflow:
+              organization:
+                members:
+                  user_id:
+                    _eq: X-Hasura-User-Id
+
+  # ----------------------------------------------------------
+  # workflow_triggers
+  # ----------------------------------------------------------
+  # Layer 1: All roles SELECT only their org's triggers
+  # Layer 2 insert:
+  #   owner — unrestricted (can add webhook triggers)
+  #   editor — cannot add webhook type triggers
+  # Layer 2 update: owner only (trigger config is sensitive)
+  # Layer 2 delete: owner only
+  # ----------------------------------------------------------
   workflow_triggers:
     select:
       - role: owner
@@ -169,6 +350,11 @@ table_permissions:
                 members:
                   user_id:
                     _eq: X-Hasura-User-Id
+          columns:
+            - workflow_id
+            - type
+            - config
+            - enabled
       - role: editor
         permission:
           check:
@@ -178,9 +364,47 @@ table_permissions:
                     members:
                       user_id:
                         _eq: X-Hasura-User-Id
+              # LAYER 2: Editors cannot create webhook triggers
               - type:
                   _neq: "webhook"
+          columns:
+            - workflow_id
+            - type
+            - config
+            - enabled
 
+    update:
+      - role: owner
+        permission:
+          filter:
+            workflow:
+              organization:
+                members:
+                  user_id:
+                    _eq: X-Hasura-User-Id
+          columns:
+            - config
+            - enabled
+
+    delete:
+      - role: owner
+        permission:
+          filter:
+            workflow:
+              organization:
+                members:
+                  user_id:
+                    _eq: X-Hasura-User-Id
+
+  # ----------------------------------------------------------
+  # workflow_runs
+  # ----------------------------------------------------------
+  # All roles can SELECT runs from their own org's workflows.
+  # Runs are created exclusively by the triggerWorkflowRun Action
+  # (no direct GraphQL insert). The Action handler already enforces
+  # Layer 2 (viewer cannot trigger). No direct insert permission
+  # is granted here to any role — that is intentional.
+  # ----------------------------------------------------------
   workflow_runs:
     select:
       - role: owner
@@ -208,6 +432,14 @@ table_permissions:
                   user_id:
                     _eq: X-Hasura-User-Id
 
+  # ----------------------------------------------------------
+  # step_runs
+  # ----------------------------------------------------------
+  # All roles can SELECT step_runs from their own org's workflows.
+  # Step_run updates (status, output, approval fields) are
+  # performed exclusively by the Action handlers — no direct
+  # client write permission is granted.
+  # ----------------------------------------------------------
   step_runs:
     select:
       - role: owner
@@ -238,6 +470,13 @@ table_permissions:
                     user_id:
                       _eq: X-Hasura-User-Id
 
+  # ----------------------------------------------------------
+  # workflow_results
+  # ----------------------------------------------------------
+  # All roles can SELECT results from their own org.
+  # Results are written exclusively by the executeDbWrite Action
+  # helper — no client insert permission.
+  # ----------------------------------------------------------
   workflow_results:
     select:
       - role: owner

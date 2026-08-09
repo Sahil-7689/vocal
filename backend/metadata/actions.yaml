@@ -1,4 +1,14 @@
 actions:
+  # ----------------------------------------------------------------
+  # triggerWorkflowRun
+  # ----------------------------------------------------------------
+  # Allowed: owner, editor
+  # Blocked: viewer (enforced both here AND in the Action handler)
+  #
+  # Layer 1: Action handler verifies the caller belongs to the
+  #          workflow's org via org_members JOIN.
+  # Layer 2: Handler additionally rejects viewer role.
+  # ----------------------------------------------------------------
   - name: triggerWorkflowRun
     definition:
       kind: synchronous
@@ -11,7 +21,25 @@ actions:
     permissions:
       - role: owner
       - role: editor
+      # viewer is intentionally omitted — they cannot trigger runs
 
+  # ----------------------------------------------------------------
+  # approveStep
+  # ----------------------------------------------------------------
+  # Allowed: owner only
+  # Blocked: editor, viewer
+  #
+  # This is intentionally owner-only at the Action declaration level.
+  # Even if a step's required_role is "editor", the Action handler
+  # performs a runtime check against the gate's config.required_role
+  # field — but the default gate role is "owner", and we conservatively
+  # restrict this action to owners only in the permission declaration.
+  #
+  # Layer 1: Action handler verifies org membership via JOIN.
+  # Layer 2: Handler checks step_run is paused, step type is
+  #          approval_gate, and caller's role satisfies
+  #          config.required_role before resuming execution.
+  # ----------------------------------------------------------------
   - name: approveStep
     definition:
       kind: synchronous
@@ -23,7 +51,26 @@ actions:
       output_type: ApproveStepOutput
     permissions:
       - role: owner
-      - role: editor
+      # editor and viewer cannot approve any step gate
+
+  # ----------------------------------------------------------------
+  # createOrganization
+  # ----------------------------------------------------------------
+  # Allowed: user (any authenticated Nhost user)
+  # The Action handler reads X-Hasura-User-Id from headers —
+  # the client never supplies the user_id or role.
+  # ----------------------------------------------------------------
+  - name: createOrganization
+    definition:
+      kind: synchronous
+      handler: "{{NHOST_FUNCTIONS_URL}}/create-organization"
+      forward_client_headers: true
+      arguments:
+        - name: name
+          type: String!
+      output_type: CreateOrganizationOutput
+    permissions:
+      - role: user
 
 custom_types:
   enums: []
@@ -40,5 +87,13 @@ custom_types:
         - name: success
           type: Boolean!
         - name: status
+          type: String!
+    - name: CreateOrganizationOutput
+      fields:
+        - name: org_id
+          type: uuid!
+        - name: name
+          type: String!
+        - name: role
           type: String!
   scalars: []

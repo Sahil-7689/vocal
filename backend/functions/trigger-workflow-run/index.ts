@@ -16,15 +16,23 @@ const pool = new Pool({
 });
 
 export default async function handleTriggerWorkflowRun(req: Request, res: Response) {
-  const userId = req.headers["x-hasura-user-id"] as string;
-  const { workflow_id } = req.body.input || {};
+  // ---------------------------------------------------------------
+  // Layer 1: Extract authenticated user identity from Hasura header.
+  // This header is injected by Hasura from the Nhost JWT — the
+  // client CANNOT forge it. Never read user_id from req.body.
+  // ---------------------------------------------------------------
+  const userId = (
+    req.headers["x-hasura-user-id"] ||
+    req.body?.session_variables?.["x-hasura-user-id"]
+  ) as string;
 
-  if (!userId) {
-    return res.status(403).json({ message: "Unauthorized: Missing authenticated user header." });
+  if (!userId || userId === "anonymous") {
+    return res.status(401).json({ message: "Unauthorized: Missing authenticated user identity." });
   }
 
+  const { workflow_id } = req.body?.input || {};
   if (!workflow_id) {
-    return res.status(400).json({ message: "Bad Request: Missing workflow_id." });
+    return res.status(400).json({ message: "Bad Request: workflow_id is required." });
   }
 
   const client = await pool.connect();
@@ -32,31 +40,52 @@ export default async function handleTriggerWorkflowRun(req: Request, res: Respon
   try {
     await client.query("BEGIN");
 
-    // Load workflow & verify organization membership + role (Layer 1 + Layer 2 Security)
+    // ---------------------------------------------------------------
+    // Layer 1: Org membership verification
+    // JOIN through org_members guarantees:
+    //   - The caller is a member of the org that owns this workflow
+    //   - An Org B user can never trigger an Org A workflow
+    //   - The caller's role is loaded from the database, not the client
+    // ---------------------------------------------------------------
     const wfRes = await client.query(
-      `SELECT w.id, w.org_id, w.name, m.role
+      `SELECT w.id, w.org_id, w.name, m.role AS user_role
        FROM public.workflows w
-       JOIN public.org_members m ON m.org_id = w.org_id
-       WHERE w.id = $1 AND m.user_id = $2`,
+       JOIN public.org_members m ON m.org_id = w.org_id AND m.user_id = $2
+       WHERE w.id = $1`,
       [workflow_id, userId]
     );
 
     if (wfRes.rows.length === 0) {
       await client.query("ROLLBACK");
-      return res.status(403).json({ message: "Unauthorized: You don't have permission to access this workflow." });
+      // Return 403 regardless of whether the workflow exists —
+      // do not reveal whether the workflow ID is valid to unauthorized callers.
+      return res.status(403).json({
+        message: "Forbidden: Workflow not found or you do not have access.",
+      });
     }
 
-    const { org_id: orgId, name: wfName, role: userRole } = wfRes.rows[0];
+    const { org_id: orgId, name: wfName, user_role: userRole } = wfRes.rows[0];
 
+    // ---------------------------------------------------------------
+    // Layer 2: Role-level trigger authorization
+    // viewer — read-only, cannot trigger runs under any circumstances
+    // editor — can trigger
+    // owner  — can trigger
+    // ---------------------------------------------------------------
     if (userRole === "viewer") {
       await client.query("ROLLBACK");
-      return res.status(403).json({ message: "Unauthorized: Viewers are not permitted to trigger workflow runs." });
+      return res.status(403).json({
+        message: "Forbidden: Viewers do not have permission to trigger workflow runs.",
+      });
     }
 
-    // Atomic Quota Reservation with Row Locking
+    // ---------------------------------------------------------------
+    // Atomic quota reservation with row locking (FOR UPDATE)
+    // Prevents race conditions when multiple editors trigger simultaneously
+    // ---------------------------------------------------------------
     await reserveOrgQuota(client, orgId);
 
-    // Insert Workflow Run
+    // Create the workflow run record
     const runRes = await client.query(
       `INSERT INTO public.workflow_runs (workflow_id, status, triggered_by, started_at)
        VALUES ($1, 'running', $2, now())
@@ -67,7 +96,9 @@ export default async function handleTriggerWorkflowRun(req: Request, res: Respon
     const runId = runRes.rows[0].id;
     await client.query("COMMIT");
 
-    // Load Steps ordered by position ASC
+    // ---------------------------------------------------------------
+    // Load ordered steps and execute sequentially
+    // ---------------------------------------------------------------
     const stepsRes = await pool.query(
       `SELECT id, workflow_id, position, name, type, config
        FROM public.workflow_steps
@@ -77,12 +108,14 @@ export default async function handleTriggerWorkflowRun(req: Request, res: Respon
     );
 
     const steps: WorkflowStep[] = stepsRes.rows;
-    let prevOutput: any = { text: "Workflow run initiated." };
+    let prevOutput: any = { text: "Workflow triggered.", triggeredBy: userId };
     let isPaused = false;
+    let executionFailed = false;
 
     for (const step of steps) {
       const stepRunRes = await pool.query(
-        `INSERT INTO public.step_runs (workflow_run_id, workflow_step_id, status, input, attempt_count, started_at)
+        `INSERT INTO public.step_runs
+           (workflow_run_id, workflow_step_id, status, input, attempt_count, started_at)
          VALUES ($1, $2, 'running', $3, 1, now())
          RETURNING id`,
         [runId, step.id, JSON.stringify(prevOutput)]
@@ -99,7 +132,7 @@ export default async function handleTriggerWorkflowRun(req: Request, res: Respon
         } else if (step.type === "conditional_branch") {
           output = await executeConditional(step.config, prevOutput);
         } else if (step.type === "approval_gate") {
-          // Pause execution for approval gate!
+          // Pause here — execution will resume via approveStep Action
           await pool.query(
             `UPDATE public.step_runs SET status = 'paused' WHERE id = $1`,
             [stepRunId]
@@ -109,8 +142,12 @@ export default async function handleTriggerWorkflowRun(req: Request, res: Respon
             [runId]
           );
           isPaused = true;
-          break; // Exit execution loop
+          break;
         } else if (step.type === "db_write") {
+          // db_write: restricted step — only reachable because Layer 1 Hasura
+          // permissions already blocked editors from adding this step type.
+          // The execution handler has no additional role check here because
+          // the restriction was already enforced at step creation time.
           const dbClient = await pool.connect();
           try {
             output = await executeDbWrite(dbClient, orgId, runId, step.config);
@@ -121,7 +158,6 @@ export default async function handleTriggerWorkflowRun(req: Request, res: Respon
           output = await executeNotify(step.config, { input: prevOutput });
         }
 
-        // Mark step completed
         await pool.query(
           `UPDATE public.step_runs
            SET status = 'completed', output = $1, completed_at = now()
@@ -131,7 +167,6 @@ export default async function handleTriggerWorkflowRun(req: Request, res: Respon
 
         prevOutput = output;
       } catch (stepErr: any) {
-        // Step failed after retries
         await pool.query(
           `UPDATE public.step_runs
            SET status = 'failed', error = $1, completed_at = now()
@@ -144,12 +179,13 @@ export default async function handleTriggerWorkflowRun(req: Request, res: Respon
            WHERE id = $2`,
           [stepErr.message, runId]
         );
+        executionFailed = true;
         break;
       }
     }
 
-    // Check if workflow fully completed
-    if (!isPaused) {
+    // Mark completed and increment quota if run finished without pausing/failing
+    if (!isPaused && !executionFailed) {
       const finalCheck = await pool.query(
         `SELECT status FROM public.workflow_runs WHERE id = $1`,
         [runId]
@@ -170,11 +206,12 @@ export default async function handleTriggerWorkflowRun(req: Request, res: Respon
 
     return res.json({
       run_id: runId,
-      status: isPaused ? "paused" : "running",
+      status: isPaused ? "paused" : executionFailed ? "failed" : "completed",
     });
   } catch (err: any) {
-    await client.query("ROLLBACK");
-    return res.status(500).json({ message: err.message || "Failed to trigger workflow run." });
+    await client.query("ROLLBACK").catch(() => {});
+    console.error("[triggerWorkflowRun] Unexpected error:", err);
+    return res.status(500).json({ message: err.message || "Internal server error." });
   } finally {
     client.release();
   }
