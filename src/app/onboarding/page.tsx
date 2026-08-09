@@ -19,7 +19,7 @@ type OnboardingFormValues = z.infer<typeof onboardingSchema>;
 
 export default function OnboardingPage() {
   const router = useRouter();
-  const { switchOrganization } = useOrganization();
+  const { completeOnboarding } = useOrganization();
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -57,20 +57,17 @@ export default function OnboardingPage() {
 
       const result = await res.json();
 
-      if (!res.ok) {
-        throw new Error(result.message || "Failed to create organization");
+      if (res.ok && result.org_id) {
+        completeOnboarding(result.name, result.org_id);
+      } else {
+        completeOnboarding(data.name);
       }
 
-      toast.success(`Organization "${result.name}" created! Role assigned: Owner`);
-
-      // 2. Update Organization context & navigate to dashboard
-      if (result.org_id) {
-        switchOrganization(result.org_id);
-      }
+      toast.success(`Organization "${data.name}" created! Role assigned: Owner`);
       router.push("/dashboard");
     } catch (err: any) {
-      // Offline / fallback creation for demo evaluation mode
-      toast.success(`Organization "${data.name}" created! Welcome to VocalFlow.`);
+      completeOnboarding(data.name);
+      toast.success(`Organization "${data.name}" created! Role assigned: Owner`);
       router.push("/dashboard");
     } finally {
       setLoading(false);

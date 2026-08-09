@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { useAuthenticationStatus } from "@nhost/react";
+import { useOrganization } from "@/context/OrganizationContext";
 import { Loader2 } from "lucide-react";
 
 const PUBLIC_ROUTES = ["/login", "/signup"];
@@ -11,6 +12,7 @@ export const AuthGuard: React.FC<{ children: React.ReactNode }> = ({ children })
   const router = useRouter();
   const pathname = usePathname();
   const { isAuthenticated, isLoading } = useAuthenticationStatus();
+  const { hasOrganization } = useOrganization();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -29,8 +31,21 @@ export const AuthGuard: React.FC<{ children: React.ReactNode }> = ({ children })
     // 1. Unauthenticated user on protected route -> Redirect to /login
     if (isLiveBackend && !isLoading && !isAuthenticated && !isPublicRoute) {
       router.replace("/login");
+      return;
     }
-  }, [isLiveBackend, isLoading, isAuthenticated, isPublicRoute, router, mounted]);
+
+    // 2. Authenticated user without an organization trying to access protected routes -> Redirect to /onboarding
+    if (!hasOrganization && pathname !== "/onboarding" && !isPublicRoute) {
+      router.replace("/onboarding");
+      return;
+    }
+
+    // 3. Authenticated user with an organization trying to visit /onboarding -> Redirect to /dashboard
+    if (hasOrganization && pathname === "/onboarding") {
+      router.replace("/dashboard");
+      return;
+    }
+  }, [isLiveBackend, isLoading, isAuthenticated, hasOrganization, isPublicRoute, pathname, router, mounted]);
 
   if (!mounted) return null;
 

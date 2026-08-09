@@ -7,6 +7,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { signUpWithEmailPassword, loginWithEmailPassword } from "@/lib/auth";
+import { useOrganization } from "@/context/OrganizationContext";
 import { ShaderBackground } from "@/components/layout/ShaderBackground";
 import { Zap, Mail, Lock, User, ArrowRight, Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -27,6 +28,7 @@ type SignupFormValues = z.infer<typeof signupSchema>;
 
 export default function SignupPage() {
   const router = useRouter();
+  const { startOnboardingForNewUser } = useOrganization();
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -50,13 +52,20 @@ export default function SignupPage() {
 
     try {
       // 1. Nhost Auth User Registration
-      await signUpWithEmailPassword(data.email, data.password, data.displayName);
+      const session = await signUpWithEmailPassword(data.email, data.password, data.displayName);
       toast.success("Account created successfully!");
 
       // 2. Automatically log user in to establish Nhost session
       await loginWithEmailPassword(data.email, data.password);
       
-      // 3. Redirect to /onboarding for organization setup
+      // 3. Mark user in OrganizationContext as needing onboarding
+      startOnboardingForNewUser({
+        id: session?.user?.id,
+        email: data.email,
+        displayName: data.displayName,
+      });
+
+      // 4. Redirect to /onboarding for organization setup
       router.push("/onboarding");
     } catch (err: any) {
       let msg = err.message || "Account registration failed. Please try again.";
