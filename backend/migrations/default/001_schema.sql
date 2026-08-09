@@ -101,3 +101,12 @@ CREATE TABLE IF NOT EXISTS public.workflow_results (
     value JSONB,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 );
+
+-- Table: workflow_events (Watched application table for database_event triggers)
+CREATE TABLE IF NOT EXISTS public.workflow_events (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    org_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+    event_type TEXT NOT NULL,
+    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+);

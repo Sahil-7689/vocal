@@ -580,3 +580,54 @@ table_permissions:
                     user_id:
                       _eq: X-Hasura-User-Id
 
+  # ── workflow_events ───────────────────────────────────────────
+  # LAYER 1: Users can insert and read events in their own org.
+  # ───────────────────────────────────────────────────────────────
+  workflow_events:
+    select:
+      - role: owner
+        permission:
+          filter:
+            organization:
+              members:
+                user_id:
+                  _eq: X-Hasura-User-Id
+      - role: editor
+        permission:
+          filter:
+            organization:
+              members:
+                user_id:
+                  _eq: X-Hasura-User-Id
+      - role: viewer
+        permission:
+          filter:
+            organization:
+              members:
+                user_id:
+                  _eq: X-Hasura-User-Id
+    insert:
+      - role: owner
+        permission:
+          check:
+            organization:
+              members:
+                user_id:
+                  _eq: X-Hasura-User-Id
+          columns:
+            - org_id
+            - event_type
+            - payload
+      - role: editor
+        permission:
+          check:
+            organization:
+              members:
+                user_id:
+                  _eq: X-Hasura-User-Id
+          columns:
+            - org_id
+            - event_type
+            - payload
+
+

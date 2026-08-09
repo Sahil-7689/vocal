@@ -22,6 +22,8 @@ CREATE INDEX IF NOT EXISTS idx_step_runs_workflow_step_id ON public.step_runs(wo
 CREATE INDEX IF NOT EXISTS idx_workflow_results_org_id ON public.workflow_results(org_id);
 CREATE INDEX IF NOT EXISTS idx_workflow_results_workflow_run_id ON public.workflow_results(workflow_run_id);
 
+CREATE INDEX IF NOT EXISTS idx_workflow_events_org_id ON public.workflow_events(org_id);
+
 -- PostgreSQL View: organization_monthly_usage
 CREATE OR REPLACE VIEW public.organization_monthly_usage AS
 SELECT

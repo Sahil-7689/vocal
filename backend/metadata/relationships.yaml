@@ -16,6 +16,11 @@ relationships:
           foreign_key_constraint_on:
             column: org_id
             table: workflow_results
+      - name: workflow_events
+        using:
+          foreign_key_constraint_on:
+            column: org_id
+            table: workflow_events
 
   org_members:
     object_relationships:
@@ -95,3 +100,9 @@ relationships:
       - name: workflow_run
         using:
           foreign_key_constraint_on: workflow_run_id
+
+  workflow_events:
+    object_relationships:
+      - name: organization
+        using:
+          foreign_key_constraint_on: org_id
