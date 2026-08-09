@@ -118,22 +118,26 @@ const wsLink =
       )
     : null;
 
-const liveLink = wsLink
-  ? split(
-      ({ query }) => {
-        const definition = getMainDefinition(query);
-        return (
-          definition.kind === "OperationDefinition" &&
-          definition.operation === "subscription"
-        );
-      },
-      wsLink,
-      authLink.concat(httpLink)
-    )
-  : authLink.concat(httpLink);
+const MOCK_OPERATIONS = [
+  "GetWorkflows",
+  "GetWorkflow",
+  "SaveWorkflow",
+  "DeleteWorkflow",
+  "GetRuns",
+  "GetRun",
+  "TriggerWorkflowRun",
+  "ApproveStep",
+  "StepRunsSubscription",
+];
+
+const hybridLink = split(
+  ({ operationName }) => MOCK_OPERATIONS.includes(operationName || ""),
+  mockApolloLink,
+  isLiveBackend ? liveLink : mockApolloLink
+);
 
 export const apolloClient = new ApolloClient({
-  link: isLiveBackend ? liveLink : mockApolloLink,
+  link: hybridLink,
   cache: new InMemoryCache(),
 });
 
