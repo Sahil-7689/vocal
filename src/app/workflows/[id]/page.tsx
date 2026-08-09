@@ -1,0 +1,329 @@
+"use client";
+
+import React, { useEffect, useState, useCallback } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { useQuery, useMutation } from "@apollo/client";
+import {
+  ReactFlow,
+  Controls,
+  Background,
+  MiniMap,
+  useNodesState,
+  useEdgesState,
+  addEdge,
+  Node,
+  Edge,
+} from "@xyflow/react";
+
+import { GET_WORKFLOW } from "@/graphql/queries/workflows";
+import { SAVE_WORKFLOW } from "@/graphql/mutations/workflows";
+import { useOrganization } from "@/context/OrganizationContext";
+import { usePermissions } from "@/hooks/usePermissions";
+import { useWorkflowStore } from "@/stores/workflowStore";
+import { Sidebar } from "@/components/layout/Sidebar";
+import { Header } from "@/components/layout/Header";
+import { StepLibrary } from "@/components/workflow/StepLibrary";
+import { CustomStepNode } from "@/components/workflow/CustomNode";
+import { StepConfigPanel } from "@/components/workflow/StepConfigPanel";
+import { TriggerPanel } from "@/components/workflow/TriggerPanel";
+import { RunWorkflowModal } from "@/components/workflow/RunWorkflowModal";
+import { Workflow, WorkflowStep, WorkflowTrigger } from "@/types";
+
+import {
+  Save,
+  Play,
+  Zap,
+  Lock,
+  AlertTriangle,
+  ChevronLeft,
+  Loader2,
+} from "lucide-react";
+import { toast } from "sonner";
+
+const nodeTypes = {
+  customStepNode: CustomStepNode,
+};
+
+export default function WorkflowBuilderPage() {
+  const params = useParams();
+  const router = useRouter();
+  const workflowId = params.id as string;
+
+  const { currentOrganization } = useOrganization();
+  const { canEditWorkflow, canRunWorkflow, isOwner } = usePermissions();
+
+  const {
+    nodes,
+    edges,
+    selectedNodeId,
+    setNodes,
+    setEdges,
+    onNodesChange,
+    onEdgesChange,
+    onConnect,
+    isDirty,
+    setDirty,
+  } = useWorkflowStore();
+
+  const [workflowName, setWorkflowName] = useState("Workflow Builder");
+  const [triggers, setTriggers] = useState<WorkflowTrigger[]>([]);
+  const [showTriggerPanel, setShowTriggerPanel] = useState(false);
+  const [showRunModal, setShowRunModal] = useState(false);
+
+  // GraphQL Queries & Mutations
+  const { data, loading, error } = useQuery(GET_WORKFLOW, {
+    variables: {
+      id: workflowId,
+      userOrgId: currentOrganization.id,
+    },
+    fetchPolicy: "network-only",
+  });
+
+  const [saveWorkflowMutation, { loading: saving }] = useMutation(SAVE_WORKFLOW);
+
+  // Synchronize React Flow nodes & edges from backend GraphQL data
+  useEffect(() => {
+    if (data?.workflow_by_pk) {
+      const wf: Workflow = data.workflow_by_pk;
+      setWorkflowName(wf.name);
+      setTriggers(wf.triggers || []);
+
+      // Map steps to React Flow nodes
+      const initialNodes: Node[] = (wf.steps || []).map((step, idx) => ({
+        id: step.id,
+        type: "customStepNode",
+        position: {
+          x: step.positionX || 300 + idx * 300,
+          y: step.positionY || 150,
+        },
+        data: {
+          id: step.id,
+          type: step.type,
+          name: step.name,
+          config: step.config,
+        },
+      }));
+
+      // Generate connecting edges from nextStepId
+      const initialEdges: Edge[] = [];
+      (wf.steps || []).forEach((step) => {
+        if (step.nextStepId) {
+          initialEdges.push({
+            id: `e-${step.id}-${step.nextStepId}`,
+            source: step.id,
+            target: step.nextStepId,
+            animated: true,
+            style: { stroke: "#6366f1", strokeWidth: 2 },
+          });
+        }
+      });
+
+      setNodes(initialNodes);
+      setEdges(initialEdges);
+      setDirty(false);
+    }
+  }, [data, setNodes, setEdges, setDirty]);
+
+  const handleSave = async () => {
+    if (!canEditWorkflow()) {
+      toast.error("Unauthorized: Viewer role cannot save workflows.");
+      return;
+    }
+
+    try {
+      const stepInputs = nodes.map((node, index) => {
+        const nextEdge = edges.find((e) => e.source === node.id);
+        return {
+          id: node.id,
+          workflowId,
+          type: node.data.type,
+          name: node.data.name,
+          positionX: Math.round(node.position.x),
+          positionY: Math.round(node.position.y),
+          config: node.data.config,
+          nextStepId: nextEdge ? nextEdge.target : null,
+        };
+      });
+
+      await saveWorkflowMutation({
+        variables: {
+          input: {
+            id: workflowId,
+            organizationId: currentOrganization.id,
+            name: workflowName,
+            status: "active",
+            steps: stepInputs,
+            triggers,
+          },
+        },
+      });
+
+      setDirty(false);
+      toast.success("Workflow saved successfully!");
+    } catch (err: any) {
+      toast.error("Failed to save workflow", { description: err.message });
+    }
+  };
+
+  // Cross-Organization Guard Handling (Requirement 24)
+  const isUnauthorized = Boolean(error) || (data && !data.workflow_by_pk);
+
+  if (isUnauthorized) {
+    return (
+      <div className="min-h-screen flex bg-background text-on-surface relative">
+        <Sidebar />
+        <div className="flex-1 ml-60 flex flex-col min-h-screen relative z-10">
+          <Header title="Workflow Builder" />
+          <div className="flex-1 flex items-center justify-center p-8">
+            <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl p-8 max-w-md w-full text-center space-y-4 shadow-xl animate-fade-up">
+              <div className="w-12 h-12 rounded-full bg-error-container/30 text-error flex items-center justify-center mx-auto">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <h2 className="font-display font-bold text-xl text-on-surface">
+                Workflow unavailable
+              </h2>
+              <p className="text-xs text-on-surface-variant">
+                You don&apos;t have permission to access this workflow.
+              </p>
+              <div className="pt-2">
+                <button
+                  onClick={() => router.push("/workflows")}
+                  className="px-4 py-2 rounded-lg bg-primary text-on-primary font-mono text-xs font-semibold hover:bg-primary-container transition-all"
+                >
+                  Return to Workflows
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen flex bg-background text-on-surface relative overflow-hidden">
+      <Sidebar />
+
+      <div className="flex-1 ml-60 flex flex-col h-screen relative z-10">
+        {/* Top Builder Bar */}
+        <header className="h-14 bg-surface-container-lowest/90 backdrop-blur-xl border-b border-outline-variant/60 px-6 flex items-center justify-between z-20">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => router.push("/workflows")}
+              className="p-1.5 rounded-lg hover:bg-surface-container text-on-surface-variant transition-colors"
+              title="Back to Workflows"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+
+            <div className="h-4 w-px bg-outline-variant/60" />
+
+            <input
+              type="text"
+              value={workflowName}
+              disabled={!canEditWorkflow()}
+              onChange={(e) => {
+                setWorkflowName(e.target.value);
+                setDirty(true);
+              }}
+              className="font-display font-bold text-base bg-transparent text-on-surface focus:bg-surface-container-low px-2 py-1 rounded outline-none border border-transparent focus:border-outline-variant transition-all"
+            />
+
+            {isDirty && (
+              <span className="font-mono text-[10px] text-amber-600 bg-amber-500/10 px-2 py-0.5 rounded font-semibold">
+                Unsaved Changes
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowTriggerPanel(!showTriggerPanel)}
+              className="px-3 py-1.5 rounded-lg bg-surface-container-low hover:bg-surface-container text-xs font-mono font-medium text-on-surface flex items-center gap-1.5 transition-colors border border-outline-variant/40"
+            >
+              <Zap className="w-3.5 h-3.5 text-primary" />
+              Triggers ({triggers.length})
+            </button>
+
+            {canEditWorkflow() && (
+              <button
+                disabled={saving}
+                onClick={handleSave}
+                className="px-4 py-1.5 rounded-lg bg-surface-container-high hover:bg-outline-variant text-on-surface font-mono text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-sm disabled:opacity-50"
+              >
+                {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                Save
+              </button>
+            )}
+
+            {canRunWorkflow() ? (
+              <button
+                onClick={() => setShowRunModal(true)}
+                className="px-4 py-1.5 rounded-lg bg-primary hover:bg-primary-container text-on-primary font-mono text-xs font-semibold flex items-center gap-1.5 shadow-md transition-all"
+              >
+                <Play className="w-3.5 h-3.5 fill-current" />
+                Run Workflow
+              </button>
+            ) : (
+              <div className="px-3 py-1.5 rounded-lg bg-surface-container border border-outline-variant/40 font-mono text-[10px] text-on-surface-variant flex items-center gap-1">
+                <Lock className="w-3 h-3 text-blue-600" />
+                <span>Viewer mode</span>
+              </div>
+            )}
+          </div>
+        </header>
+
+        {/* Trigger Modal Drawer */}
+        {showTriggerPanel && (
+          <div className="absolute top-16 right-6 z-30 max-w-xl w-full animate-fade-up">
+            <TriggerPanel triggers={triggers} onUpdateTriggers={(t) => { setTriggers(t); setDirty(true); }} />
+          </div>
+        )}
+
+        {/* Main Canvas Workspace */}
+        <div className="flex-1 flex relative overflow-hidden">
+          {/* Left Step Library */}
+          <StepLibrary />
+
+          {/* React Flow Canvas */}
+          <main className="flex-1 relative bg-surface-container-low/30">
+            {loading ? (
+              <div className="absolute inset-0 flex items-center justify-center font-mono text-xs text-on-surface-variant animate-pulse">
+                Loading workflow canvas...
+              </div>
+            ) : (
+              <ReactFlow
+                nodes={nodes}
+                edges={edges}
+                onNodesChange={onNodesChange}
+                onEdgesChange={onEdgesChange}
+                onConnect={onConnect}
+                nodeTypes={nodeTypes}
+                fitView
+              >
+                <Background color="#c7c4d7" gap={20} size={1} />
+                <Controls className="!bg-surface-container-lowest !border-outline-variant !shadow-md" />
+                <MiniMap
+                  className="!bg-surface-container-lowest !border-outline-variant"
+                  nodeColor="#4648d4"
+                  maskColor="rgba(249, 249, 249, 0.7)"
+                />
+              </ReactFlow>
+            )}
+          </main>
+
+          {/* Right Configuration Panel */}
+          <StepConfigPanel />
+        </div>
+      </div>
+
+      {/* Run Confirmation Modal */}
+      <RunWorkflowModal
+        workflowId={workflowId}
+        workflowName={workflowName}
+        isOpen={showRunModal}
+        onClose={() => setShowRunModal(false)}
+      />
+    </div>
+  );
+}

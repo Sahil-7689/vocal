@@ -1,0 +1,44 @@
+actions:
+  - name: triggerWorkflowRun
+    definition:
+      kind: synchronous
+      handler: "{{NHOST_FUNCTIONS_URL}}/trigger-workflow-run"
+      forward_client_headers: true
+      arguments:
+        - name: workflow_id
+          type: uuid!
+      output_type: TriggerWorkflowRunOutput
+    permissions:
+      - role: owner
+      - role: editor
+
+  - name: approveStep
+    definition:
+      kind: synchronous
+      handler: "{{NHOST_FUNCTIONS_URL}}/approve-step"
+      forward_client_headers: true
+      arguments:
+        - name: step_run_id
+          type: uuid!
+      output_type: ApproveStepOutput
+    permissions:
+      - role: owner
+      - role: editor
+
+custom_types:
+  enums: []
+  input_objects: []
+  objects:
+    - name: TriggerWorkflowRunOutput
+      fields:
+        - name: run_id
+          type: uuid!
+        - name: status
+          type: String!
+    - name: ApproveStepOutput
+      fields:
+        - name: success
+          type: Boolean!
+        - name: status
+          type: String!
+  scalars: []

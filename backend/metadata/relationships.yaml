@@ -1,0 +1,85 @@
+relationships:
+  organizations:
+    array_relationships:
+      - name: members
+        using:
+          foreign_key_constraint_on:
+            column: org_id
+            table: org_members
+      - name: workflows
+        using:
+          foreign_key_constraint_on:
+            column: org_id
+            table: workflows
+      - name: workflow_results
+        using:
+          foreign_key_constraint_on:
+            column: org_id
+            table: workflow_results
+
+  org_members:
+    object_relationships:
+      - name: organization
+        using:
+          foreign_key_constraint_on: org_id
+
+  workflows:
+    object_relationships:
+      - name: organization
+        using:
+          foreign_key_constraint_on: org_id
+    array_relationships:
+      - name: steps
+        using:
+          foreign_key_constraint_on:
+            column: workflow_id
+            table: workflow_steps
+      - name: triggers
+        using:
+          foreign_key_constraint_on:
+            column: workflow_id
+            table: workflow_triggers
+      - name: runs
+        using:
+          foreign_key_constraint_on:
+            column: workflow_id
+            table: workflow_runs
+
+  workflow_steps:
+    object_relationships:
+      - name: workflow
+        using:
+          foreign_key_constraint_on: workflow_id
+    array_relationships:
+      - name: step_runs
+        using:
+          foreign_key_constraint_on:
+            column: workflow_step_id
+            table: step_runs
+
+  workflow_triggers:
+    object_relationships:
+      - name: workflow
+        using:
+          foreign_key_constraint_on: workflow_id
+
+  workflow_runs:
+    object_relationships:
+      - name: workflow
+        using:
+          foreign_key_constraint_on: workflow_id
+    array_relationships:
+      - name: step_runs
+        using:
+          foreign_key_constraint_on:
+            column: workflow_run_id
+            table: step_runs
+
+  step_runs:
+    object_relationships:
+      - name: workflow_run
+        using:
+          foreign_key_constraint_on: workflow_run_id
+      - name: workflow_step
+        using:
+          foreign_key_constraint_on: workflow_step_id

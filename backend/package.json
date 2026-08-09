@@ -1,0 +1,25 @@
+{
+  "name": "vocalflow-backend",
+  "version": "1.0.0",
+  "description": "VocalFlow Production Backend (Nhost + Hasura + PostgreSQL + Actions)",
+  "main": "functions/server.ts",
+  "scripts": {
+    "dev": "tsx watch functions/server.ts",
+    "start": "tsx functions/server.ts",
+    "test": "vitest run",
+    "build": "tsc --noEmit"
+  },
+  "dependencies": {
+    "axios": "^1.7.7",
+    "express": "^4.21.1",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^20.17.0",
+    "@types/pg": "^8.11.10",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.3"
+  }
+}

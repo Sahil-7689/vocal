@@ -1,0 +1,44 @@
+@import "tailwindcss/base";
+@import "tailwindcss/components";
+@import "tailwindcss/utilities";
+
+@import "@xyflow/react/dist/style.css";
+
+@layer base {
+  body {
+    @apply bg-background text-on-surface font-sans antialiased selection:bg-primary/20 selection:text-primary;
+  }
+}
+
+/* React Flow Canvas custom grid background */
+.react-flow__background {
+  background-color: #f9f9f9;
+}
+
+.react-flow__node {
+  border-radius: 0.5rem;
+}
+
+.react-flow__edge-path {
+  stroke: #4648d4;
+  stroke-width: 2;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c7c4d7;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #767586;
+}
