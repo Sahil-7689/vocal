@@ -52,24 +52,36 @@ export default function SignupPage() {
 
     try {
       // 1. Nhost Auth User Registration
-      const session = await signUpWithEmailPassword(data.email, data.password, data.displayName);
-      toast.success("Account created successfully!");
+      const result = await signUpWithEmailPassword(data.email, data.password, data.displayName);
 
-      // 2. Automatically log user in to establish Nhost session
-      await loginWithEmailPassword(data.email, data.password);
-      
-      // 3. Mark user in OrganizationContext as needing onboarding
+      // 2. Mark user in OrganizationContext as needing onboarding
       startOnboardingForNewUser({
-        id: session?.user?.id,
+        id: result?.user?.id || (result?.session as any)?.user?.id,
         email: data.email,
         displayName: data.displayName,
       });
 
-      // 4. Redirect to /onboarding for organization setup
+      // 3. Automatically establish session via login if needed
+      try {
+        await loginWithEmailPassword(data.email, data.password);
+      } catch (loginErr: any) {
+        const loginMsg = loginErr.message || "";
+        if (loginMsg.toLowerCase().includes("unverified") || loginMsg.toLowerCase().includes("verification")) {
+          toast.info("Account created! Please check your email inbox to confirm your address, then Sign In.");
+          router.push("/login");
+          return;
+        }
+      }
+
+      toast.success("Account created successfully!");
       router.push("/onboarding");
     } catch (err: any) {
       let msg = err.message || "Account registration failed. Please try again.";
-      if (msg.toLowerCase().includes("email already in use") || msg.toLowerCase().includes("already registered") || msg.toLowerCase().includes("already exists")) {
+      if (
+        msg.toLowerCase().includes("email already in use") ||
+        msg.toLowerCase().includes("already registered") ||
+        msg.toLowerCase().includes("already exists")
+      ) {
         msg = "An account with this email already exists. Please Sign In below.";
       }
       setErrorMessage(msg);

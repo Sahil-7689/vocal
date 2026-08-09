@@ -77,11 +77,11 @@ export async function signUpWithEmailPassword(email: string, password: string, d
         if (retryRes.error) {
           throw new Error(retryRes.error.message);
         }
-        return retryRes.session;
+        return { session: retryRes.session, user: retryRes.session?.user || null };
       }
       throw new Error(res.error.message);
     }
-    return res.session;
+    return { session: res.session, user: res.session?.user || null };
   } catch (err: any) {
     throw new Error(err.message || "Failed to sign up");
   }
