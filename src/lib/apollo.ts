@@ -75,7 +75,7 @@ const mockApolloLink = new ApolloLink((operation) => {
   });
 });
 
-const httpUri = graphqlUrl || (nhostSubdomain ? `https://${nhostSubdomain}.graphql.${nhostRegion}.nhost.run/v1/graphql` : "https://mock.nhost.run/v1/graphql");
+const httpUri = graphqlUrl || (nhostSubdomain ? `https://${nhostSubdomain}.graphql.${nhostRegion}.nhost.run/v1/graphql` : "http://localhost:4000/v1/graphql");
 
 const httpLink = new HttpLink({
   uri: httpUri,

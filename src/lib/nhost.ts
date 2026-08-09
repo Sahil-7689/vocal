@@ -1,9 +1,15 @@
 import { NhostClient } from "@nhost/react";
 
-const subdomain = (process.env.NEXT_PUBLIC_NHOST_SUBDOMAIN || "").trim() || "demo";
-const region = (process.env.NEXT_PUBLIC_NHOST_REGION || "").trim() || "us-east-1";
+const subdomain = (process.env.NEXT_PUBLIC_NHOST_SUBDOMAIN || "").trim();
+const region = (process.env.NEXT_PUBLIC_NHOST_REGION || "us-east-1").trim();
 
 export const nhost = new NhostClient({
-  subdomain,
-  region,
+  ...(subdomain
+    ? { subdomain, region }
+    : {
+        authUrl: "http://localhost:4000/v1/auth",
+        graphqlUrl: "http://localhost:4000/v1/graphql",
+        autoSignIn: false,
+        autoRefreshToken: false,
+      }),
 });
