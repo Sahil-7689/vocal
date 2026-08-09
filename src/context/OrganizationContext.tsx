@@ -37,7 +37,21 @@ const OrganizationContext = createContext<OrganizationContextType>({
 });
 
 export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [currentUser, setCurrentUser] = useState<User>(defaultUser);
+  const [currentUser, setCurrentUser] = useState<User>(() => {
+    if (typeof window !== "undefined") {
+      const nhostUser = getCurrentUser();
+      if (nhostUser) {
+        return {
+          id: nhostUser.id,
+          email: nhostUser.email || "user@vocalflow.ai",
+          displayName: nhostUser.displayName || nhostUser.email || "User",
+          avatarUrl: nhostUser.avatarUrl || defaultUser.avatarUrl,
+        };
+      }
+    }
+    return defaultUser;
+  });
+
   const [currentOrgId, setCurrentOrgId] = useState<string>("org-acme-a");
   const [organizations, setOrganizations] = useState<Organization[]>(MOCK_ORGANIZATIONS);
   const [members, setMembers] = useState<OrgMember[]>(MOCK_MEMBERS);
