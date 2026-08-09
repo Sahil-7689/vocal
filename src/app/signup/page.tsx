@@ -54,27 +54,30 @@ export default function SignupPage() {
       // 1. Nhost Auth User Registration
       const result = await signUpWithEmailPassword(data.email, data.password, data.displayName);
 
-      // 2. Mark user in OrganizationContext as needing onboarding
+      // 2. Mark user as needing onboarding BEFORE any navigation or auth state changes
+      //    This sets pendingOnboarding=true which blocks AuthGuard from sending to /dashboard
       startOnboardingForNewUser({
         id: result?.user?.id || (result?.session as any)?.user?.id,
         email: data.email,
         displayName: data.displayName,
       });
 
-      // 3. Automatically establish session via login if needed
+      // 3. Navigate to onboarding immediately so the router reaches /onboarding
+      //    before Nhost's isAuthenticated flag triggers AuthGuard rule #4
+      router.push("/onboarding");
+
+      // 4. Try to establish session in the background (email verification handling)
       try {
         await loginWithEmailPassword(data.email, data.password);
       } catch (loginErr: any) {
         const loginMsg = loginErr.message || "";
         if (loginMsg.toLowerCase().includes("unverified") || loginMsg.toLowerCase().includes("verification")) {
           toast.info("Account created! Please check your email inbox to confirm your address, then Sign In.");
-          router.push("/login");
-          return;
+          router.replace("/login");
         }
       }
 
-      toast.success("Account created successfully!");
-      router.push("/onboarding");
+      toast.success("Account created successfully! Set up your organization below.");
     } catch (err: any) {
       let msg = err.message || "Account registration failed. Please try again.";
       if (

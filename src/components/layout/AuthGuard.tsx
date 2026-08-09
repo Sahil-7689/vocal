@@ -12,7 +12,7 @@ export const AuthGuard: React.FC<{ children: React.ReactNode }> = ({ children })
   const router = useRouter();
   const pathname = usePathname();
   const { isAuthenticated, isLoading } = useAuthenticationStatus();
-  const { hasOrganization } = useOrganization();
+  const { hasOrganization, pendingOnboarding } = useOrganization();
   const [mounted, setMounted] = useState(false);
   const [authCheckTimeout, setAuthCheckTimeout] = useState(false);
 
@@ -35,26 +35,41 @@ export const AuthGuard: React.FC<{ children: React.ReactNode }> = ({ children })
 
     const isSessionLoading = isLoading && !authCheckTimeout;
 
-    // 1. Unauthenticated user on protected route -> Redirect to /login
+    // 1. Unauthenticated user on protected route → redirect to /login
     if (isLiveBackend && !isSessionLoading && !isAuthenticated && !isPublicRoute) {
       router.replace("/login");
       return;
     }
 
-    // 2. Authenticated user without an organization trying to access protected routes -> Redirect to /onboarding
+    // If the user just signed up (pendingOnboarding=true) and is on a public route,
+    // signup page will navigate to /onboarding directly — do not interfere here.
+    if (pendingOnboarding) {
+      if (pathname !== "/onboarding" && !isPublicRoute) {
+        router.replace("/onboarding");
+      }
+      return;
+    }
+
+    // 2. Authenticated user without an organization on protected routes → /onboarding
     if (isAuthenticated && !hasOrganization && pathname !== "/onboarding" && !isPublicRoute) {
       router.replace("/onboarding");
       return;
     }
 
-    // 3. Authenticated user with an organization trying to visit /onboarding -> Redirect to /dashboard
+    // 3. Authenticated user WITH an organization trying to visit /onboarding → /dashboard
     if (isAuthenticated && hasOrganization && pathname === "/onboarding") {
       router.replace("/dashboard");
       return;
     }
 
-    // 4. Authenticated user with an organization trying to visit public auth routes (/login, /signup) -> Redirect to /dashboard
-    if (isLiveBackend && !isSessionLoading && isAuthenticated && isPublicRoute && pathname !== "/forgot-password") {
+    // 4. Authenticated user with an organization visiting public auth routes → /dashboard
+    if (
+      isLiveBackend &&
+      !isSessionLoading &&
+      isAuthenticated &&
+      isPublicRoute &&
+      pathname !== "/forgot-password"
+    ) {
       if (hasOrganization) {
         router.replace("/dashboard");
       } else {
@@ -62,11 +77,22 @@ export const AuthGuard: React.FC<{ children: React.ReactNode }> = ({ children })
       }
       return;
     }
-  }, [isLiveBackend, isLoading, authCheckTimeout, isAuthenticated, hasOrganization, isPublicRoute, pathname, router, mounted]);
+  }, [
+    isLiveBackend,
+    isLoading,
+    authCheckTimeout,
+    isAuthenticated,
+    hasOrganization,
+    pendingOnboarding,
+    isPublicRoute,
+    pathname,
+    router,
+    mounted,
+  ]);
 
   if (!mounted) return null;
 
-  // Show loading spinner while Nhost determines authentication session on protected routes (max 2 seconds)
+  // Show loading spinner while Nhost determines session on protected routes (max 2 seconds)
   if (isLiveBackend && isLoading && !authCheckTimeout && !isPublicRoute) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-background text-on-surface font-mono text-xs space-y-3">

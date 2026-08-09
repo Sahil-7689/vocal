@@ -11,6 +11,8 @@ interface OrganizationContextType {
   organizations: Organization[];
   members: OrgMember[];
   hasOrganization: boolean;
+  /** True immediately after signup, before the user completes onboarding. */
+  pendingOnboarding: boolean;
   switchOrganization: (orgId: string) => void;
   switchUserRole: (userId: string, role: OrgRole) => void;
   startOnboardingForNewUser: (user: Partial<User>) => void;
@@ -40,6 +42,7 @@ const OrganizationContext = createContext<OrganizationContextType>({
   organizations: [],
   members: [],
   hasOrganization: false,
+  pendingOnboarding: false,
   switchOrganization: () => {},
   switchUserRole: () => {},
   startOnboardingForNewUser: () => {},
@@ -65,6 +68,8 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const [currentOrgId, setCurrentOrgId] = useState<string | null>(null);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [members, setMembers] = useState<OrgMember[]>([]);
+  // pendingOnboarding is set to true right after signup, cleared after completeOnboarding
+  const [pendingOnboarding, setPendingOnboarding] = useState(false);
 
   // Sync with Nhost auth if logged in
   useEffect(() => {
@@ -81,13 +86,17 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }
   }, []);
 
-  const userMemberships = currentUser.id && currentUser.id !== "unauthenticated"
-    ? members.filter((m) => m.userId === currentUser.id)
-    : [];
+  const userMemberships =
+    currentUser.id && currentUser.id !== "unauthenticated"
+      ? members.filter((m) => m.userId === currentUser.id)
+      : [];
 
-  const hasOrganization = userMemberships.length > 0;
+  // A user has an org only if they have a real membership AND are not in the middle of onboarding
+  const hasOrganization = !pendingOnboarding && userMemberships.length > 0;
 
-  const currentOrganization = organizations.find((o) => o.id === currentOrgId) || (organizations.length > 0 ? organizations[0] : fallbackOrg);
+  const currentOrganization =
+    organizations.find((o) => o.id === currentOrgId) ||
+    (organizations.length > 0 ? organizations[0] : fallbackOrg);
 
   const currentMember = members.find(
     (m) => m.organizationId === currentOrgId && m.userId === currentUser.id
@@ -102,9 +111,7 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const switchUserRole = (userId: string, newRole: OrgRole) => {
     setMembers((prev) =>
       prev.map((m) =>
-        m.organizationId === currentOrgId && m.userId === userId
-          ? { ...m, role: newRole }
-          : m
+        m.organizationId === currentOrgId && m.userId === userId ? { ...m, role: newRole } : m
       )
     );
   };
@@ -118,6 +125,8 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       avatarUrl: fallbackUser.avatarUrl,
     };
     setCurrentUser(newUser);
+    // Signal that this user is brand-new and must complete onboarding first
+    setPendingOnboarding(true);
   };
 
   const completeOnboarding = (orgName: string, customOrgId?: string) => {
@@ -143,6 +152,8 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     setOrganizations((prev) => [newOrg, ...prev]);
     setMembers((prev) => [newMember, ...prev]);
     setCurrentOrgId(newOrgId);
+    // Onboarding complete — clear the pending flag
+    setPendingOnboarding(false);
   };
 
   return (
@@ -154,6 +165,7 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         organizations,
         members: members.filter((m) => m.organizationId === currentOrgId),
         hasOrganization,
+        pendingOnboarding,
         switchOrganization,
         switchUserRole,
         startOnboardingForNewUser,
