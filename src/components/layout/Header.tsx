@@ -17,10 +17,12 @@ export const Header: React.FC<HeaderProps> = ({ title }) => {
 
   const handleLogout = async () => {
     try {
+      if (typeof window !== "undefined") sessionStorage.removeItem("vocalflow_authenticated");
       await logoutUser();
       toast.success("Logged out successfully");
       router.push("/login");
     } catch (err: any) {
+      if (typeof window !== "undefined") sessionStorage.removeItem("vocalflow_authenticated");
       toast.success("Logged out successfully");
       router.push("/login");
     }

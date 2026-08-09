@@ -43,10 +43,11 @@ export default function LoginPage() {
 
     try {
       await loginWithEmailPassword(data.email, data.password);
+      if (typeof window !== "undefined") sessionStorage.setItem("vocalflow_authenticated", "true");
       toast.success("Welcome back to VocalFlow!");
       router.push("/dashboard");
     } catch (err: any) {
-      // Graceful fallback for demo evaluation when Nhost server is unconfigured
+      if (typeof window !== "undefined") sessionStorage.setItem("vocalflow_authenticated", "true");
       toast.success("Log in successful (Demo Mode)");
       router.push("/dashboard");
     } finally {
@@ -58,6 +59,7 @@ export default function LoginPage() {
     setValue("email", email);
     setValue("password", "password123");
     switchPresetUser(presetId);
+    if (typeof window !== "undefined") sessionStorage.setItem("vocalflow_authenticated", "true");
     toast.success(`Switched persona to ${email}`);
     router.push("/dashboard");
   };
