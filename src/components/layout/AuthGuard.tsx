@@ -5,7 +5,7 @@ import { useRouter, usePathname } from "next/navigation";
 import { useAuthenticationStatus } from "@nhost/react";
 import { Loader2 } from "lucide-react";
 
-const PUBLIC_ROUTES = ["/login"];
+const PUBLIC_ROUTES = ["/login", "/signup"];
 
 export const AuthGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const router = useRouter();
@@ -26,7 +26,7 @@ export const AuthGuard: React.FC<{ children: React.ReactNode }> = ({ children })
   useEffect(() => {
     if (!mounted) return;
 
-    // Enforce strict redirect to /login if live backend is enabled, Nhost state resolved, and unauthenticated on protected route
+    // 1. Unauthenticated user on protected route -> Redirect to /login
     if (isLiveBackend && !isLoading && !isAuthenticated && !isPublicRoute) {
       router.replace("/login");
     }

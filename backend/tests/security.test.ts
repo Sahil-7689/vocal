@@ -43,6 +43,18 @@ function canAddRestrictedStep(userId: string, orgId: string, stepType: string): 
   return member.role === "owner" || member.role === "editor";
 }
 
+function simulateOrganizationOnboarding(authenticatedUserId: string, orgName: string) {
+  if (!authenticatedUserId || authenticatedUserId === "anonymous") {
+    throw new Error("401 Unauthorized");
+  }
+
+  const newOrgId = `org-${Math.random().toString(36).substring(7)}`;
+  const newOrg = { id: newOrgId, name: orgName, quota_allowed: 10000, quota_used: 0 };
+  const newMember = { org_id: newOrgId, user_id: authenticatedUserId, role: "owner" };
+
+  return { newOrg, newMember };
+}
+
 describe("VocalFlow Security & Organization Isolation Test Suite", () => {
   it("Layer 1 Isolation: Org A user can access Org A workflows", () => {
     expect(canAccessWorkflow("user-owner-a", "w0000000-0000-0000-0000-000000000001")).toBe(true);
@@ -68,5 +80,12 @@ describe("VocalFlow Security & Organization Isolation Test Suite", () => {
     expect(canAddRestrictedStep("user-editor-a", orgId, "db_write")).toBe(false);
     expect(canAddRestrictedStep("user-owner-a", orgId, "notify")).toBe(true);
     expect(canAddRestrictedStep("user-editor-a", orgId, "notify")).toBe(false);
+  });
+
+  it("Organization Onboarding: Creates organization and assigns authenticated user as Owner", () => {
+    const { newOrg, newMember } = simulateOrganizationOnboarding("new-nhost-user-999", "Stark Industries");
+    expect(newOrg.name).toBe("Stark Industries");
+    expect(newMember.user_id).toBe("new-nhost-user-999");
+    expect(newMember.role).toBe("owner");
   });
 });
