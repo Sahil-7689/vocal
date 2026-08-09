@@ -1,20 +1,26 @@
 -- VocalFlow Migration 002_indexes_and_views.sql
 
--- Performance Indexes
+-- Performance & Foreign Key Indexes
 CREATE INDEX IF NOT EXISTS idx_org_members_org_id ON public.org_members(org_id);
 CREATE INDEX IF NOT EXISTS idx_org_members_user_id ON public.org_members(user_id);
+CREATE INDEX IF NOT EXISTS idx_org_members_user_org ON public.org_members(user_id, org_id);
 
 CREATE INDEX IF NOT EXISTS idx_workflows_org_id ON public.workflows(org_id);
+
 CREATE INDEX IF NOT EXISTS idx_workflow_steps_workflow_id ON public.workflow_steps(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_steps_workflow_pos ON public.workflow_steps(workflow_id, position);
+
 CREATE INDEX IF NOT EXISTS idx_workflow_triggers_workflow_id ON public.workflow_triggers(workflow_id);
 
 CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow_id ON public.workflow_runs(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_org_id ON public.workflow_runs(org_id);
 CREATE INDEX IF NOT EXISTS idx_workflow_runs_status ON public.workflow_runs(status);
 
 CREATE INDEX IF NOT EXISTS idx_step_runs_workflow_run_id ON public.step_runs(workflow_run_id);
 CREATE INDEX IF NOT EXISTS idx_step_runs_workflow_step_id ON public.step_runs(workflow_step_id);
 
 CREATE INDEX IF NOT EXISTS idx_workflow_results_org_id ON public.workflow_results(org_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_results_workflow_run_id ON public.workflow_results(workflow_run_id);
 
 -- PostgreSQL View: organization_monthly_usage
 CREATE OR REPLACE VIEW public.organization_monthly_usage AS

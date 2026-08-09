@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS public.workflows (
     org_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     description TEXT,
-    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('draft', 'active', 'archived')),
+    status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'active', 'archived')),
     created_by UUID,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
@@ -55,14 +55,19 @@ CREATE TABLE IF NOT EXISTS public.workflow_triggers (
     type TEXT NOT NULL CHECK (type IN ('manual', 'webhook', 'scheduled', 'database_event')),
     config JSONB NOT NULL DEFAULT '{}'::jsonb,
     enabled BOOLEAN NOT NULL DEFAULT true,
-    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 );
 
 -- Table: workflow_runs
 CREATE TABLE IF NOT EXISTS public.workflow_runs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     workflow_id UUID NOT NULL REFERENCES public.workflows(id) ON DELETE CASCADE,
-    status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'paused', 'completed', 'failed')),
+    org_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+    trigger_type TEXT,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'paused', 'completed', 'failed', 'cancelled')),
+    input JSONB,
+    output JSONB,
     triggered_by TEXT DEFAULT 'System',
     started_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
     completed_at TIMESTAMP WITH TIME ZONE,
@@ -75,7 +80,7 @@ CREATE TABLE IF NOT EXISTS public.step_runs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     workflow_run_id UUID NOT NULL REFERENCES public.workflow_runs(id) ON DELETE CASCADE,
     workflow_step_id UUID NOT NULL REFERENCES public.workflow_steps(id) ON DELETE CASCADE,
-    status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'completed', 'failed', 'paused')),
+    status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'paused', 'completed', 'failed', 'skipped')),
     input JSONB,
     output JSONB,
     error TEXT,
@@ -91,8 +96,8 @@ CREATE TABLE IF NOT EXISTS public.step_runs (
 CREATE TABLE IF NOT EXISTS public.workflow_results (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     org_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
-    workflow_run_id UUID REFERENCES public.workflow_runs(id) ON DELETE SET NULL,
+    workflow_run_id UUID NOT NULL REFERENCES public.workflow_runs(id) ON DELETE CASCADE,
     key TEXT NOT NULL,
-    value JSONB NOT NULL,
+    value JSONB,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 );

@@ -68,6 +68,9 @@ relationships:
       - name: workflow
         using:
           foreign_key_constraint_on: workflow_id
+      - name: organization
+        using:
+          foreign_key_constraint_on: org_id
     array_relationships:
       - name: step_runs
         using:
@@ -83,3 +86,12 @@ relationships:
       - name: workflow_step
         using:
           foreign_key_constraint_on: workflow_step_id
+
+  workflow_results:
+    object_relationships:
+      - name: organization
+        using:
+          foreign_key_constraint_on: org_id
+      - name: workflow_run
+        using:
+          foreign_key_constraint_on: workflow_run_id
