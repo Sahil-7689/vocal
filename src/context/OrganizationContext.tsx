@@ -41,7 +41,7 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const [currentOrgId, setCurrentOrgId] = useState<string>("org-acme-a");
   const [organizations, setOrganizations] = useState<Organization[]>(MOCK_ORGANIZATIONS);
   const [members, setMembers] = useState<OrgMember[]>(MOCK_MEMBERS);
-  const [hasOrganization, setHasOrganization] = useState<boolean>(true);
+  const [newlyRegisteredUserId, setNewlyRegisteredUserId] = useState<string | null>(null);
 
   // Sync with Nhost auth if logged in
   useEffect(() => {
@@ -56,6 +56,9 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }
   }, []);
 
+  const userMemberships = members.filter((m) => m.userId === currentUser.id);
+  const hasOrganization = newlyRegisteredUserId === currentUser.id ? false : userMemberships.length > 0;
+
   const currentOrganization = organizations.find((o) => o.id === currentOrgId) || defaultOrg;
 
   const currentMember = members.find(
@@ -66,7 +69,7 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   const switchOrganization = (orgId: string) => {
     setCurrentOrgId(orgId);
-    setHasOrganization(true);
+    setNewlyRegisteredUserId(null);
   };
 
   const switchUserRole = (userId: string, newRole: OrgRole) => {
@@ -82,7 +85,7 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const switchPresetUser = (presetId: string) => {
     const targetUser = MOCK_USERS.find((u) => u.id === presetId) || defaultUser;
     setCurrentUser(targetUser);
-    setHasOrganization(true);
+    setNewlyRegisteredUserId(null);
 
     if (presetId === "user-orgb-1") {
       setCurrentOrgId("org-cyberdyne-b");
@@ -92,14 +95,15 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   };
 
   const startOnboardingForNewUser = (user: Partial<User>) => {
+    const userId = user.id || `user-new-${Date.now()}`;
     const newUser: User = {
-      id: user.id || `user-new-${Date.now()}`,
+      id: userId,
       email: user.email || "newuser@vocalflow.ai",
       displayName: user.displayName || user.email?.split("@")[0] || "New User",
       avatarUrl: defaultUser.avatarUrl,
     };
     setCurrentUser(newUser);
-    setHasOrganization(false);
+    setNewlyRegisteredUserId(userId);
   };
 
   const completeOnboarding = (orgName: string, customOrgId?: string) => {
@@ -125,7 +129,7 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     setOrganizations((prev) => [newOrg, ...prev]);
     setMembers((prev) => [newMember, ...prev]);
     setCurrentOrgId(newOrgId);
-    setHasOrganization(true);
+    setNewlyRegisteredUserId(null);
   };
 
   return (
