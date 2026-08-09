@@ -26,34 +26,20 @@ export const AuthGuard: React.FC<{ children: React.ReactNode }> = ({ children })
   useEffect(() => {
     if (!mounted) return;
 
-    const isDemoAuthenticated =
-      typeof window !== "undefined" &&
-      sessionStorage.getItem("vocalflow_authenticated") === "true";
-
-    // Only redirect if backend is live, Nhost isn't loading, user isn't authenticated via Nhost or Demo preset, and route is protected
-    if (
-      isLiveBackend &&
-      !isLoading &&
-      !isAuthenticated &&
-      !isDemoAuthenticated &&
-      !isPublicRoute
-    ) {
+    // Enforce strict redirect to /login if live backend is enabled, Nhost state resolved, and unauthenticated on protected route
+    if (isLiveBackend && !isLoading && !isAuthenticated && !isPublicRoute) {
       router.replace("/login");
     }
-  }, [isLiveBackend, isLoading, isAuthenticated, isPublicRoute, router, mounted, pathname]);
+  }, [isLiveBackend, isLoading, isAuthenticated, isPublicRoute, router, mounted]);
 
   if (!mounted) return null;
 
-  const isDemoAuthenticated =
-    typeof window !== "undefined" &&
-    sessionStorage.getItem("vocalflow_authenticated") === "true";
-
-  // Show loading indicator while Nhost is determining session state on protected routes
-  if (isLiveBackend && isLoading && !isAuthenticated && !isDemoAuthenticated && !isPublicRoute) {
+  // Show loading spinner while Nhost determines authentication session on protected routes
+  if (isLiveBackend && isLoading && !isPublicRoute) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-background text-on-surface font-mono text-xs space-y-3">
         <Loader2 className="w-6 h-6 animate-spin text-primary" />
-        <span className="text-on-surface-variant">Verifying session...</span>
+        <span className="text-on-surface-variant">Verifying Nhost session...</span>
       </div>
     );
   }

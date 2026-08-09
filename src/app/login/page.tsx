@@ -6,9 +6,8 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { loginWithEmailPassword } from "@/lib/auth";
-import { useOrganization } from "@/context/OrganizationContext";
 import { ShaderBackground } from "@/components/layout/ShaderBackground";
-import { Zap, Mail, Lock, ArrowRight, Loader2, UserCheck } from "lucide-react";
+import { Zap, Mail, Lock, ArrowRight, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 const loginSchema = z.object({
@@ -20,20 +19,18 @@ type LoginFormValues = z.infer<typeof loginSchema>;
 
 export default function LoginPage() {
   const router = useRouter();
-  const { switchPresetUser } = useOrganization();
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const {
     register,
     handleSubmit,
-    setValue,
     formState: { errors },
   } = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
     defaultValues: {
-      email: "sahil@vocalflow.ai",
-      password: "password123",
+      email: "",
+      password: "",
     },
   });
 
@@ -43,29 +40,19 @@ export default function LoginPage() {
 
     try {
       await loginWithEmailPassword(data.email, data.password);
-      if (typeof window !== "undefined") sessionStorage.setItem("vocalflow_authenticated", "true");
       toast.success("Welcome back to VocalFlow!");
       router.push("/dashboard");
     } catch (err: any) {
-      if (typeof window !== "undefined") sessionStorage.setItem("vocalflow_authenticated", "true");
-      toast.success("Log in successful (Demo Mode)");
-      router.push("/dashboard");
+      const msg = err.message || "Sign in failed. Please check your credentials.";
+      setErrorMessage(msg);
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleQuickLogin = (presetId: string, email: string) => {
-    setValue("email", email);
-    setValue("password", "password123");
-    switchPresetUser(presetId);
-    if (typeof window !== "undefined") sessionStorage.setItem("vocalflow_authenticated", "true");
-    toast.success(`Switched persona to ${email}`);
-    router.push("/dashboard");
-  };
-
   return (
-    <div className="relative min-h-screen w-full flex items-center justify-center p-4 overflow-hidden">
+    <div className="relative min-h-screen w-full flex items-center justify-center p-4 overflow-hidden bg-background">
       {/* WebGL Shader Canvas Background */}
       <ShaderBackground />
 
@@ -143,52 +130,6 @@ export default function LoginPage() {
             )}
           </button>
         </form>
-
-        {/* Quick Demo Switcher Presets */}
-        <div className="pt-4 border-t border-outline-variant/40 space-y-2">
-          <div className="flex items-center gap-1 font-mono text-[10px] uppercase text-on-surface-variant font-medium">
-            <UserCheck className="w-3 h-3 text-primary" />
-            <span>Quick Demo Presets</span>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
-            <button
-              type="button"
-              onClick={() => handleQuickLogin("user-owner-1", "sahil@vocalflow.ai")}
-              className="p-2 rounded bg-surface-container-low hover:bg-primary/10 border border-outline-variant/40 text-left transition-colors"
-            >
-              <div className="font-bold text-primary">Org A — Owner</div>
-              <div className="text-[9px] text-on-surface-variant">Sahil Kumar</div>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleQuickLogin("user-editor-1", "editor@vocalflow.ai")}
-              className="p-2 rounded bg-surface-container-low hover:bg-amber-500/10 border border-outline-variant/40 text-left transition-colors"
-            >
-              <div className="font-bold text-amber-600">Org A — Editor</div>
-              <div className="text-[9px] text-on-surface-variant">Alex Rivera</div>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleQuickLogin("user-viewer-1", "viewer@vocalflow.ai")}
-              className="p-2 rounded bg-surface-container-low hover:bg-blue-500/10 border border-outline-variant/40 text-left transition-colors"
-            >
-              <div className="font-bold text-blue-600">Org A — Viewer</div>
-              <div className="text-[9px] text-on-surface-variant">Jordan Lee</div>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleQuickLogin("user-orgb-1", "cyberdyne@orgb.ai")}
-              className="p-2 rounded bg-surface-container-low hover:bg-purple-500/10 border border-outline-variant/40 text-left transition-colors"
-            >
-              <div className="font-bold text-purple-600">Org B — Cyberdyne</div>
-              <div className="text-[9px] text-on-surface-variant">Miles Dyson</div>
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   );
