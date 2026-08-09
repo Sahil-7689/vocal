@@ -1,6 +1,22 @@
 import { nhost } from "./nhost";
 
+const isLiveBackend = () =>
+  Boolean(
+    (process.env.NEXT_PUBLIC_GRAPHQL_URL || "").trim() ||
+      (process.env.NEXT_PUBLIC_NHOST_SUBDOMAIN || "").trim()
+  );
+
 export async function loginWithEmailPassword(email: string, password: string) {
+  if (!isLiveBackend()) {
+    return {
+      user: {
+        id: `user-local-${Date.now()}`,
+        email,
+        displayName: email.split("@")[0],
+      },
+    };
+  }
+
   try {
     const res = await nhost.auth.signIn({
       email,
@@ -16,6 +32,16 @@ export async function loginWithEmailPassword(email: string, password: string) {
 }
 
 export async function signUpWithEmailPassword(email: string, password: string, displayName?: string) {
+  if (!isLiveBackend()) {
+    return {
+      user: {
+        id: `user-local-${Date.now()}`,
+        email,
+        displayName: displayName || email.split("@")[0],
+      },
+    };
+  }
+
   try {
     const res = await nhost.auth.signUp({
       email,
@@ -34,14 +60,25 @@ export async function signUpWithEmailPassword(email: string, password: string, d
 }
 
 export async function logoutUser() {
+  if (!isLiveBackend()) return;
+
   try {
     await nhost.auth.signOut();
   } catch (err: any) {
-    // Ignore signout errors in offline mode
+    // Ignore signout errors in local mode
   }
 }
 
 export function getCurrentUser() {
+  if (!isLiveBackend()) {
+    return {
+      id: "user-owner-a",
+      email: "sahil@vocalflow.ai",
+      displayName: "Sahil Kumar",
+      avatarUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150",
+    };
+  }
+
   try {
     return nhost.auth.getUser();
   } catch (err) {
@@ -50,6 +87,8 @@ export function getCurrentUser() {
 }
 
 export function getAccessToken() {
+  if (!isLiveBackend()) return null;
+
   try {
     return nhost.auth.getAccessToken();
   } catch (err) {
