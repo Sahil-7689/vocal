@@ -59,7 +59,10 @@ export default function SignupPage() {
       // 3. Redirect to /onboarding for organization setup
       router.push("/onboarding");
     } catch (err: any) {
-      const msg = err.message || "Account registration failed. Please try again.";
+      let msg = err.message || "Account registration failed. Please try again.";
+      if (msg.toLowerCase().includes("email already in use") || msg.toLowerCase().includes("already registered") || msg.toLowerCase().includes("already exists")) {
+        msg = "An account with this email already exists. Please Sign In below.";
+      }
       setErrorMessage(msg);
       toast.error(msg);
     } finally {

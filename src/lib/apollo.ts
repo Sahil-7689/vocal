@@ -15,9 +15,9 @@ import {
   subscribeToMockStepRuns,
 } from "./mockBackend";
 
-const graphqlUrl = process.env.NEXT_PUBLIC_GRAPHQL_URL;
-const nhostSubdomain = process.env.NEXT_PUBLIC_NHOST_SUBDOMAIN;
-const nhostRegion = process.env.NEXT_PUBLIC_NHOST_REGION || "us-east-1";
+const graphqlUrl = (process.env.NEXT_PUBLIC_GRAPHQL_URL || "").trim();
+const nhostSubdomain = (process.env.NEXT_PUBLIC_NHOST_SUBDOMAIN || "").trim();
+const nhostRegion = (process.env.NEXT_PUBLIC_NHOST_REGION || "us-east-1").trim();
 
 // Custom Mock Link to serve offline/demo mode GraphQL operations seamlessly
 const mockApolloLink = new ApolloLink((operation) => {
@@ -86,7 +86,7 @@ const authLink = new ApolloLink((operation, forward) => {
   operation.setContext(({ headers = {} }: { headers?: Record<string, string> }) => ({
     headers: {
       ...headers,
-      authorization: token ? `Bearer ${token}` : "",
+      ...(token ? { authorization: `Bearer ${token}` } : { "x-hasura-role": "anonymous" }),
     },
   }));
   return forward(operation);
