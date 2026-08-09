@@ -15,11 +15,29 @@ export async function loginWithEmailPassword(email: string, password: string) {
   }
 }
 
+export async function signUpWithEmailPassword(email: string, password: string, displayName?: string) {
+  try {
+    const res = await nhost.auth.signUp({
+      email,
+      password,
+      options: {
+        displayName: displayName || email,
+      },
+    });
+    if (res.error) {
+      throw new Error(res.error.message);
+    }
+    return res.session;
+  } catch (err: any) {
+    throw new Error(err.message || "Failed to sign up");
+  }
+}
+
 export async function logoutUser() {
   try {
     await nhost.auth.signOut();
   } catch (err: any) {
-    // Ignore signout errors in offline demo mode
+    // Ignore signout errors in offline mode
   }
 }
 

@@ -5,20 +5,22 @@ import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { loginWithEmailPassword } from "@/lib/auth";
+import { loginWithEmailPassword, signUpWithEmailPassword } from "@/lib/auth";
 import { ShaderBackground } from "@/components/layout/ShaderBackground";
-import { Zap, Mail, Lock, ArrowRight, Loader2 } from "lucide-react";
+import { Zap, Mail, Lock, User, ArrowRight, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
-const loginSchema = z.object({
+const authSchema = z.object({
   email: z.string().email("Please enter a valid email address"),
   password: z.string().min(6, "Password must be at least 6 characters"),
+  displayName: z.string().optional(),
 });
 
-type LoginFormValues = z.infer<typeof loginSchema>;
+type AuthFormValues = z.infer<typeof authSchema>;
 
 export default function LoginPage() {
   const router = useRouter();
+  const [isSignUp, setIsSignUp] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -26,24 +28,33 @@ export default function LoginPage() {
     register,
     handleSubmit,
     formState: { errors },
-  } = useForm<LoginFormValues>({
-    resolver: zodResolver(loginSchema),
+  } = useForm<AuthFormValues>({
+    resolver: zodResolver(authSchema),
     defaultValues: {
       email: "",
       password: "",
+      displayName: "",
     },
   });
 
-  const onSubmit = async (data: LoginFormValues) => {
+  const onSubmit = async (data: AuthFormValues) => {
     setLoading(true);
     setErrorMessage(null);
 
     try {
-      await loginWithEmailPassword(data.email, data.password);
-      toast.success("Welcome back to VocalFlow!");
-      router.push("/dashboard");
+      if (isSignUp) {
+        await signUpWithEmailPassword(data.email, data.password, data.displayName);
+        toast.success("Account created successfully! Logging you in...");
+        // Automatically attempt sign in after signup
+        await loginWithEmailPassword(data.email, data.password);
+        router.push("/dashboard");
+      } else {
+        await loginWithEmailPassword(data.email, data.password);
+        toast.success("Welcome back to VocalFlow!");
+        router.push("/dashboard");
+      }
     } catch (err: any) {
-      const msg = err.message || "Sign in failed. Please check your credentials.";
+      const msg = err.message || `${isSignUp ? "Account creation" : "Sign in"} failed.`;
       setErrorMessage(msg);
       toast.error(msg);
     } finally {
@@ -64,7 +75,7 @@ export default function LoginPage() {
           </div>
           <h1 className="font-display font-bold text-2xl text-on-surface">VocalFlow</h1>
           <p className="font-mono text-xs text-on-surface-variant">
-            AI Workflow Automation Platform
+            {isSignUp ? "Create your production account" : "AI Workflow Automation Platform"}
           </p>
         </div>
 
@@ -74,8 +85,25 @@ export default function LoginPage() {
           </div>
         )}
 
-        {/* Login Form */}
+        {/* Auth Form */}
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 text-xs">
+          {isSignUp && (
+            <div className="space-y-1">
+              <label className="block font-mono text-[11px] text-on-surface-variant font-medium">
+                Full Name / Display Name
+              </label>
+              <div className="relative">
+                <User className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant" />
+                <input
+                  {...register("displayName")}
+                  type="text"
+                  placeholder="Sahil Kumar"
+                  className="w-full h-10 pl-9 pr-3 rounded-lg bg-surface-container-low border border-outline-variant/60 focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                />
+              </div>
+            </div>
+          )}
+
           <div className="space-y-1">
             <label className="block font-mono text-[11px] text-on-surface-variant font-medium">
               Email address
@@ -120,16 +148,49 @@ export default function LoginPage() {
             {loading ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                Signing in...
+                {isSignUp ? "Creating account..." : "Signing in..."}
               </>
             ) : (
               <>
-                Sign in to VocalFlow
+                {isSignUp ? "Create Account & Sign In" : "Sign in to VocalFlow"}
                 <ArrowRight className="w-4 h-4" />
               </>
             )}
           </button>
         </form>
+
+        {/* Toggle between Sign In & Create Account */}
+        <div className="pt-4 border-t border-outline-variant/40 text-center font-mono text-xs">
+          {isSignUp ? (
+            <p className="text-on-surface-variant">
+              Already have an account?{" "}
+              <button
+                type="button"
+                onClick={() => {
+                  setIsSignUp(false);
+                  setErrorMessage(null);
+                }}
+                className="text-primary font-bold hover:underline"
+              >
+                Sign In
+              </button>
+            </p>
+          ) : (
+            <p className="text-on-surface-variant">
+              Don't have an account?{" "}
+              <button
+                type="button"
+                onClick={() => {
+                  setIsSignUp(true);
+                  setErrorMessage(null);
+                }}
+                className="text-primary font-bold hover:underline"
+              >
+                Create Account
+              </button>
+            </p>
+          )}
+        </div>
       </div>
     </div>
   );
