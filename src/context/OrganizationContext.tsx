@@ -2,7 +2,6 @@
 
 import React, { createContext, useContext, useState, useEffect } from "react";
 import { Organization, OrgMember, OrgRole, User } from "@/types";
-import { MOCK_ORGANIZATIONS, MOCK_MEMBERS, MOCK_USERS } from "@/lib/mockBackend";
 import { getCurrentUser } from "@/lib/auth";
 
 interface OrganizationContextType {
@@ -14,24 +13,35 @@ interface OrganizationContextType {
   hasOrganization: boolean;
   switchOrganization: (orgId: string) => void;
   switchUserRole: (userId: string, role: OrgRole) => void;
-  switchPresetUser: (userPresetId: string) => void;
   startOnboardingForNewUser: (user: Partial<User>) => void;
   completeOnboarding: (orgName: string, orgId?: string) => void;
 }
 
-const defaultUser = MOCK_USERS[0];
-const defaultOrg = MOCK_ORGANIZATIONS[0];
+const fallbackUser: User = {
+  id: "unauthenticated",
+  email: "",
+  displayName: "",
+  avatarUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150",
+};
+
+const fallbackOrg: Organization = {
+  id: "org-default",
+  name: "My Organization",
+  slug: "my-organization",
+  quotaLimit: 10000,
+  quotaUsed: 0,
+  createdAt: new Date().toISOString(),
+};
 
 const OrganizationContext = createContext<OrganizationContextType>({
-  currentUser: defaultUser,
-  currentOrganization: defaultOrg,
-  currentRole: "owner",
-  organizations: MOCK_ORGANIZATIONS,
-  members: MOCK_MEMBERS,
-  hasOrganization: true,
+  currentUser: fallbackUser,
+  currentOrganization: fallbackOrg,
+  currentRole: "viewer",
+  organizations: [],
+  members: [],
+  hasOrganization: false,
   switchOrganization: () => {},
   switchUserRole: () => {},
-  switchPresetUser: () => {},
   startOnboardingForNewUser: () => {},
   completeOnboarding: () => {},
 });
@@ -43,23 +53,18 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       if (nhostUser) {
         return {
           id: nhostUser.id,
-          email: nhostUser.email || "user@vocalflow.ai",
+          email: nhostUser.email || "",
           displayName: nhostUser.displayName || nhostUser.email || "User",
-          avatarUrl: nhostUser.avatarUrl || defaultUser.avatarUrl,
+          avatarUrl: nhostUser.avatarUrl || fallbackUser.avatarUrl,
         };
       }
     }
-    return {
-      id: "unauthenticated",
-      email: "",
-      displayName: "",
-    };
+    return fallbackUser;
   });
 
-  const [currentOrgId, setCurrentOrgId] = useState<string>("org-acme-a");
-  const [organizations, setOrganizations] = useState<Organization[]>(MOCK_ORGANIZATIONS);
-  const [members, setMembers] = useState<OrgMember[]>(MOCK_MEMBERS);
-  const [newlyRegisteredUserId, setNewlyRegisteredUserId] = useState<string | null>(null);
+  const [currentOrgId, setCurrentOrgId] = useState<string | null>(null);
+  const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [members, setMembers] = useState<OrgMember[]>([]);
 
   // Sync with Nhost auth if logged in
   useEffect(() => {
@@ -67,17 +72,22 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     if (nhostUser) {
       setCurrentUser({
         id: nhostUser.id,
-        email: nhostUser.email || "user@vocalflow.ai",
+        email: nhostUser.email || "",
         displayName: nhostUser.displayName || nhostUser.email || "User",
-        avatarUrl: nhostUser.avatarUrl || defaultUser.avatarUrl,
+        avatarUrl: nhostUser.avatarUrl || fallbackUser.avatarUrl,
       });
+    } else {
+      setCurrentUser(fallbackUser);
     }
   }, []);
 
-  const userMemberships = currentUser.id ? members.filter((m) => m.userId === currentUser.id) : [];
-  const hasOrganization = newlyRegisteredUserId === currentUser.id ? false : userMemberships.length > 0;
+  const userMemberships = currentUser.id && currentUser.id !== "unauthenticated"
+    ? members.filter((m) => m.userId === currentUser.id)
+    : [];
 
-  const currentOrganization = organizations.find((o) => o.id === currentOrgId) || defaultOrg;
+  const hasOrganization = userMemberships.length > 0;
+
+  const currentOrganization = organizations.find((o) => o.id === currentOrgId) || (organizations.length > 0 ? organizations[0] : fallbackOrg);
 
   const currentMember = members.find(
     (m) => m.organizationId === currentOrgId && m.userId === currentUser.id
@@ -87,7 +97,6 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   const switchOrganization = (orgId: string) => {
     setCurrentOrgId(orgId);
-    setNewlyRegisteredUserId(null);
   };
 
   const switchUserRole = (userId: string, newRole: OrgRole) => {
@@ -100,28 +109,15 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     );
   };
 
-  const switchPresetUser = (presetId: string) => {
-    const targetUser = MOCK_USERS.find((u) => u.id === presetId) || defaultUser;
-    setCurrentUser(targetUser);
-    setNewlyRegisteredUserId(null);
-
-    if (presetId === "user-orgb-1") {
-      setCurrentOrgId("org-cyberdyne-b");
-    } else {
-      setCurrentOrgId("org-acme-a");
-    }
-  };
-
   const startOnboardingForNewUser = (user: Partial<User>) => {
     const userId = user.id || `user-new-${Date.now()}`;
     const newUser: User = {
       id: userId,
-      email: user.email || "newuser@vocalflow.ai",
+      email: user.email || "",
       displayName: user.displayName || user.email?.split("@")[0] || "New User",
-      avatarUrl: defaultUser.avatarUrl,
+      avatarUrl: fallbackUser.avatarUrl,
     };
     setCurrentUser(newUser);
-    setNewlyRegisteredUserId(userId);
   };
 
   const completeOnboarding = (orgName: string, customOrgId?: string) => {
@@ -147,7 +143,6 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     setOrganizations((prev) => [newOrg, ...prev]);
     setMembers((prev) => [newMember, ...prev]);
     setCurrentOrgId(newOrgId);
-    setNewlyRegisteredUserId(null);
   };
 
   return (
@@ -161,7 +156,6 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         hasOrganization,
         switchOrganization,
         switchUserRole,
-        switchPresetUser,
         startOnboardingForNewUser,
         completeOnboarding,
       }}
