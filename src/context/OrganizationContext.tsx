@@ -1,6 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect } from "react";
+import { useAuthenticationStatus, useUserData } from "@nhost/react";
 import { Organization, OrgMember, OrgRole, User } from "@/types";
 import { getCurrentUser } from "@/lib/auth";
 
@@ -50,41 +51,40 @@ const OrganizationContext = createContext<OrganizationContextType>({
 });
 
 export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [currentUser, setCurrentUser] = useState<User>(() => {
-    if (typeof window !== "undefined") {
-      const nhostUser = getCurrentUser();
-      if (nhostUser) {
-        return {
-          id: nhostUser.id,
-          email: nhostUser.email || "",
-          displayName: nhostUser.displayName || nhostUser.email || "User",
-          avatarUrl: nhostUser.avatarUrl || fallbackUser.avatarUrl,
-        };
-      }
-    }
-    return fallbackUser;
-  });
+  const nhostUser = useUserData(); // live Nhost user — null when not authed
+  const { isAuthenticated } = useAuthenticationStatus();
 
+  const [currentUser, setCurrentUser] = useState<User>(fallbackUser);
   const [currentOrgId, setCurrentOrgId] = useState<string | null>(null);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [members, setMembers] = useState<OrgMember[]>([]);
   // pendingOnboarding is set to true right after signup, cleared after completeOnboarding
   const [pendingOnboarding, setPendingOnboarding] = useState(false);
 
-  // Sync with Nhost auth if logged in
+  // Sync currentUser from live Nhost session whenever auth state changes
   useEffect(() => {
-    const nhostUser = getCurrentUser();
-    if (nhostUser) {
+    if (nhostUser && isAuthenticated) {
       setCurrentUser({
         id: nhostUser.id,
         email: nhostUser.email || "",
         displayName: nhostUser.displayName || nhostUser.email || "User",
         avatarUrl: nhostUser.avatarUrl || fallbackUser.avatarUrl,
       });
-    } else {
-      setCurrentUser(fallbackUser);
+    } else if (!isAuthenticated) {
+      // Only reset if we're not mid-onboarding (local/standalone mode)
+      const localUser = getCurrentUser();
+      if (localUser) {
+        setCurrentUser({
+          id: localUser.id,
+          email: localUser.email || "",
+          displayName: localUser.displayName || localUser.email || "User",
+          avatarUrl: localUser.avatarUrl || fallbackUser.avatarUrl,
+        });
+      } else {
+        setCurrentUser(fallbackUser);
+      }
     }
-  }, []);
+  }, [nhostUser, isAuthenticated]);
 
   const userMemberships =
     currentUser.id && currentUser.id !== "unauthenticated"
@@ -117,7 +117,7 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   };
 
   const startOnboardingForNewUser = (user: Partial<User>) => {
-    const userId = user.id || `user-new-${Date.now()}`;
+    const userId = user.id || currentUser.id || `user-new-${Date.now()}`;
     const newUser: User = {
       id: userId,
       email: user.email || "",

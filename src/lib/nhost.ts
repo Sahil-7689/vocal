@@ -1,11 +1,18 @@
 import { NhostClient } from "@nhost/react";
 
-const subdomain = (process.env.NEXT_PUBLIC_NHOST_SUBDOMAIN || "").trim() || "vocalflow-prod";
-const region = (process.env.NEXT_PUBLIC_NHOST_REGION || "").trim() || "us-east-1";
+const subdomain = (process.env.NEXT_PUBLIC_NHOST_SUBDOMAIN || "").trim();
+const region = (process.env.NEXT_PUBLIC_NHOST_REGION || "").trim();
+
+if (!subdomain || !region) {
+  console.warn(
+    "[nhost] NEXT_PUBLIC_NHOST_SUBDOMAIN or NEXT_PUBLIC_NHOST_REGION is not set. " +
+      "Authentication will not work. Please check your .env.local file."
+  );
+}
 
 export const nhost = new NhostClient({
-  subdomain,
-  region,
-  autoSignIn: Boolean((process.env.NEXT_PUBLIC_NHOST_SUBDOMAIN || "").trim()),
-  autoRefreshToken: Boolean((process.env.NEXT_PUBLIC_NHOST_SUBDOMAIN || "").trim()),
+  subdomain: subdomain || "localhost",
+  region: region || "local",
+  autoSignIn: true,
+  autoRefreshToken: true,
 });
