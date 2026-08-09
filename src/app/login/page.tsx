@@ -113,8 +113,9 @@ export default function LoginPage() {
               <input
                 {...register("email")}
                 type="email"
+                autoComplete="off"
                 placeholder="name@company.com"
-                className="w-full h-10 pl-9 pr-3 rounded-lg bg-surface-container-low border border-outline-variant/60 focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                className="w-full h-10 pl-9 pr-3 rounded-lg bg-surface-container-low border border-outline-variant/60 focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all font-mono"
               />
             </div>
             {errors.email && (
@@ -131,8 +132,9 @@ export default function LoginPage() {
               <input
                 {...register("password")}
                 type="password"
+                autoComplete="new-password"
                 placeholder="••••••••"
-                className="w-full h-10 pl-9 pr-3 rounded-lg bg-surface-container-low border border-outline-variant/60 focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                className="w-full h-10 pl-9 pr-3 rounded-lg bg-surface-container-low border border-outline-variant/60 focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all font-mono"
               />
             </div>
             {errors.password && (
