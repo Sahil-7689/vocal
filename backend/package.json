@@ -4,8 +4,8 @@
   "description": "VocalFlow Production Backend (Nhost + Hasura + PostgreSQL + Actions)",
   "main": "functions/server.ts",
   "scripts": {
-    "dev": "tsx watch functions/server.ts",
-    "start": "tsx functions/server.ts",
+    "dev": "tsx watch --env-file=.env functions/server.ts",
+    "start": "tsx --env-file=.env functions/server.ts",
     "test": "vitest run",
     "build": "tsc --noEmit"
   },
