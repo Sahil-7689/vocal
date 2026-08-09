@@ -118,6 +118,20 @@ const wsLink =
       )
     : null;
 
+const liveLink = wsLink
+  ? split(
+      ({ query }) => {
+        const definition = getMainDefinition(query);
+        return (
+          definition.kind === "OperationDefinition" &&
+          definition.operation === "subscription"
+        );
+      },
+      wsLink,
+      authLink.concat(httpLink)
+    )
+  : authLink.concat(httpLink);
+
 const MOCK_OPERATIONS = [
   "GetWorkflows",
   "GetWorkflow",
@@ -140,4 +154,3 @@ export const apolloClient = new ApolloClient({
   link: hybridLink,
   cache: new InMemoryCache(),
 });
-
