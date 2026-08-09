@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -124,9 +125,19 @@ export default function LoginPage() {
           </div>
 
           <div className="space-y-1">
-            <label className="block font-mono text-[11px] text-on-surface-variant font-medium">
-              Password
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="block font-mono text-[11px] text-on-surface-variant font-medium">
+                Password
+              </label>
+              {!isSignUp && (
+                <Link
+                  href="/forgot-password"
+                  className="font-mono text-[10px] text-primary hover:underline"
+                >
+                  Forgot password?
+                </Link>
+              )}
+            </div>
             <div className="relative">
               <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant" />
               <input

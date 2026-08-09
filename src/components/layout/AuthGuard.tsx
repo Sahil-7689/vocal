@@ -6,7 +6,7 @@ import { useAuthenticationStatus } from "@nhost/react";
 import { useOrganization } from "@/context/OrganizationContext";
 import { Loader2 } from "lucide-react";
 
-const PUBLIC_ROUTES = ["/login", "/signup"];
+const PUBLIC_ROUTES = ["/login", "/signup", "/forgot-password"];
 
 export const AuthGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const router = useRouter();
