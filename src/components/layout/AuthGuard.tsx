@@ -52,6 +52,16 @@ export const AuthGuard: React.FC<{ children: React.ReactNode }> = ({ children })
       router.replace("/dashboard");
       return;
     }
+
+    // 4. Authenticated user with an organization trying to visit public auth routes (/login, /signup) -> Redirect to /dashboard
+    if (isLiveBackend && !isSessionLoading && isAuthenticated && isPublicRoute && pathname !== "/forgot-password") {
+      if (hasOrganization) {
+        router.replace("/dashboard");
+      } else {
+        router.replace("/onboarding");
+      }
+      return;
+    }
   }, [isLiveBackend, isLoading, authCheckTimeout, isAuthenticated, hasOrganization, isPublicRoute, pathname, router, mounted]);
 
   if (!mounted) return null;
