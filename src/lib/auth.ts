@@ -6,19 +6,23 @@ const isLiveBackend = () =>
       (process.env.NEXT_PUBLIC_NHOST_SUBDOMAIN || "").trim()
   );
 
+let activeLocalUser: any = null;
+
 export async function loginWithEmailPassword(email: string, password: string) {
   if (!isLiveBackend()) {
-    return {
-      user: {
-        id: `user-local-${Date.now()}`,
-        email,
-        displayName: email.split("@")[0],
-      },
+    const user = {
+      id: `user-local-${Date.now()}`,
+      email,
+      displayName: email.split("@")[0],
     };
+    activeLocalUser = user;
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("vocalflow_local_user", JSON.stringify(user));
+    }
+    return { user };
   }
 
   try {
-    // If an existing session is present, sign out first so a new user can sign in
     if (nhost.auth.isAuthenticated()) {
       await nhost.auth.signOut();
     }
@@ -38,17 +42,19 @@ export async function loginWithEmailPassword(email: string, password: string) {
 
 export async function signUpWithEmailPassword(email: string, password: string, displayName?: string) {
   if (!isLiveBackend()) {
-    return {
-      user: {
-        id: `user-local-${Date.now()}`,
-        email,
-        displayName: displayName || email.split("@")[0],
-      },
+    const user = {
+      id: `user-local-${Date.now()}`,
+      email,
+      displayName: displayName || email.split("@")[0],
     };
+    activeLocalUser = user;
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("vocalflow_local_user", JSON.stringify(user));
+    }
+    return { user, session: { user } };
   }
 
   try {
-    // If an existing session is present, sign out first so a new user can register
     if (nhost.auth.isAuthenticated()) {
       await nhost.auth.signOut();
     }
@@ -88,6 +94,10 @@ export async function signUpWithEmailPassword(email: string, password: string, d
 }
 
 export async function logoutUser() {
+  activeLocalUser = null;
+  if (typeof window !== "undefined") {
+    sessionStorage.removeItem("vocalflow_local_user");
+  }
   if (!isLiveBackend()) return;
 
   try {
@@ -99,12 +109,15 @@ export async function logoutUser() {
 
 export function getCurrentUser() {
   if (!isLiveBackend()) {
-    return {
-      id: "user-owner-a",
-      email: "sahil@vocalflow.ai",
-      displayName: "Sahil Kumar",
-      avatarUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150",
-    };
+    if (typeof window !== "undefined") {
+      const stored = sessionStorage.getItem("vocalflow_local_user");
+      if (stored) {
+        try {
+          return JSON.parse(stored);
+        } catch (e) {}
+      }
+    }
+    return activeLocalUser;
   }
 
   try {

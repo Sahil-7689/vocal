@@ -49,7 +49,11 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         };
       }
     }
-    return defaultUser;
+    return {
+      id: "unauthenticated",
+      email: "",
+      displayName: "",
+    };
   });
 
   const [currentOrgId, setCurrentOrgId] = useState<string>("org-acme-a");
@@ -70,7 +74,7 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }
   }, []);
 
-  const userMemberships = members.filter((m) => m.userId === currentUser.id);
+  const userMemberships = currentUser.id ? members.filter((m) => m.userId === currentUser.id) : [];
   const hasOrganization = newlyRegisteredUserId === currentUser.id ? false : userMemberships.length > 0;
 
   const currentOrganization = organizations.find((o) => o.id === currentOrgId) || defaultOrg;
