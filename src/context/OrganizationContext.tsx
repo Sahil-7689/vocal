@@ -4,6 +4,7 @@ import React, { createContext, useContext, useState, useEffect } from "react";
 import { useAuthenticationStatus, useUserData } from "@nhost/react";
 import { Organization, OrgMember, OrgRole, User } from "@/types";
 import { getCurrentUser } from "@/lib/auth";
+import { MOCK_ORGANIZATIONS, MOCK_MEMBERS } from "@/lib/mockBackend";
 
 interface OrganizationContextType {
   currentUser: User;
@@ -56,8 +57,8 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   const [currentUser, setCurrentUser] = useState<User>(fallbackUser);
   const [currentOrgId, setCurrentOrgId] = useState<string | null>(null);
-  const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [members, setMembers] = useState<OrgMember[]>([]);
+  const [organizations, setOrganizations] = useState<Organization[]>(MOCK_ORGANIZATIONS);
+  const [members, setMembers] = useState<OrgMember[]>(MOCK_MEMBERS);
   // pendingOnboarding is set to true right after signup, cleared after completeOnboarding
   const [pendingOnboarding, setPendingOnboarding] = useState(false);
 

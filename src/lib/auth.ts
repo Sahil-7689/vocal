@@ -8,16 +8,26 @@ const isLiveBackend = () =>
 
 let activeLocalUser: any = null;
 
+function resolvePreseededUserId(email: string): string {
+  const e = (email || "").toLowerCase().trim();
+  if (e.includes("owner.a") || e.includes("sahil@vocalflow.ai")) return "user-owner-1";
+  if (e.includes("editor.a") || e.includes("editor@vocalflow.ai")) return "user-editor-1";
+  if (e.includes("viewer.a") || e.includes("viewer@vocalflow.ai")) return "user-viewer-1";
+  if (e.includes("owner.b") || e.includes("cyberdyne@orgb.ai")) return "user-orgb-1";
+  return `user-local-${Date.now()}`;
+}
+
 export async function loginWithEmailPassword(email: string, password: string) {
   if (!isLiveBackend()) {
+    const userId = resolvePreseededUserId(email);
     const user = {
-      id: `user-local-${Date.now()}`,
+      id: userId,
       email,
       displayName: email.split("@")[0],
     };
     activeLocalUser = user;
     if (typeof window !== "undefined") {
-      sessionStorage.setItem("vocalflow_local_user", JSON.stringify(user));
+      localStorage.setItem("vocalflow_local_user", JSON.stringify(user));
     }
     return { user };
   }
@@ -42,14 +52,15 @@ export async function loginWithEmailPassword(email: string, password: string) {
 
 export async function signUpWithEmailPassword(email: string, password: string, displayName?: string) {
   if (!isLiveBackend()) {
+    const userId = resolvePreseededUserId(email);
     const user = {
-      id: `user-local-${Date.now()}`,
+      id: userId,
       email,
       displayName: displayName || email.split("@")[0],
     };
     activeLocalUser = user;
     if (typeof window !== "undefined") {
-      sessionStorage.setItem("vocalflow_local_user", JSON.stringify(user));
+      localStorage.setItem("vocalflow_local_user", JSON.stringify(user));
     }
     return { user, session: { user } };
   }
@@ -96,6 +107,7 @@ export async function signUpWithEmailPassword(email: string, password: string, d
 export async function logoutUser() {
   activeLocalUser = null;
   if (typeof window !== "undefined") {
+    localStorage.removeItem("vocalflow_local_user");
     sessionStorage.removeItem("vocalflow_local_user");
   }
   if (!isLiveBackend()) return;
@@ -110,7 +122,7 @@ export async function logoutUser() {
 export function getCurrentUser() {
   if (!isLiveBackend()) {
     if (typeof window !== "undefined") {
-      const stored = sessionStorage.getItem("vocalflow_local_user");
+      const stored = localStorage.getItem("vocalflow_local_user") || sessionStorage.getItem("vocalflow_local_user");
       if (stored) {
         try {
           return JSON.parse(stored);
