@@ -56,8 +56,8 @@ export const Header: React.FC<HeaderProps> = ({ title }) => {
         <div className="flex items-center gap-2 pl-2 border-l border-outline-variant/40">
           <div className="w-8 h-8 rounded-full overflow-hidden border border-outline-variant shrink-0">
             <img
-              src={currentUser.avatarUrl}
-              alt={currentUser.displayName}
+              src={currentUser?.avatarUrl || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150"}
+              alt={currentUser?.displayName || "User"}
               className="w-full h-full object-cover"
             />
           </div>

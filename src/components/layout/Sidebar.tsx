@@ -140,16 +140,16 @@ export const Sidebar: React.FC = () => {
         {currentUser && (
           <div className="flex items-center gap-3 px-2 py-1.5">
             <img
-              src={currentUser.avatarUrl || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150"}
-              alt={currentUser.displayName || "User"}
+              src={currentUser?.avatarUrl || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150"}
+              alt={currentUser?.displayName || "User"}
               className="w-8 h-8 rounded-full object-cover border border-outline-variant shrink-0"
             />
             <div className="flex-1 truncate">
               <div className="text-xs font-medium text-on-surface truncate">
-                {currentUser.displayName || currentUser.email}
+                {currentUser?.displayName || currentUser?.email || "User"}
               </div>
               <div className="font-mono text-[10px] text-on-surface-variant truncate">
-                {currentUser.email}
+                {currentUser?.email || ""}
               </div>
             </div>
           </div>
