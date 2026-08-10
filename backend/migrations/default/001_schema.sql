@@ -110,3 +110,9 @@ CREATE TABLE IF NOT EXISTS public.workflow_events (
     payload JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 );
+
+-- Idempotent Column Additions (for existing database instances created prior to Phase 2/5 schema updates)
+ALTER TABLE public.workflow_runs ADD COLUMN IF NOT EXISTS org_id UUID REFERENCES public.organizations(id) ON DELETE CASCADE;
+ALTER TABLE public.workflow_triggers ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT now();
+ALTER TABLE public.step_runs ADD COLUMN IF NOT EXISTS approved_by UUID;
+ALTER TABLE public.step_runs ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP WITH TIME ZONE;

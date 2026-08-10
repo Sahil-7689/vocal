@@ -1,5 +1,11 @@
 -- VocalFlow Migration 002_indexes_and_views.sql
 
+-- Ensure required columns exist for existing database instances created prior to schema updates
+ALTER TABLE public.workflow_runs ADD COLUMN IF NOT EXISTS org_id UUID REFERENCES public.organizations(id) ON DELETE CASCADE;
+ALTER TABLE public.workflow_triggers ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT now();
+ALTER TABLE public.step_runs ADD COLUMN IF NOT EXISTS approved_by UUID;
+ALTER TABLE public.step_runs ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP WITH TIME ZONE;
+
 -- Performance & Foreign Key Indexes
 CREATE INDEX IF NOT EXISTS idx_org_members_org_id ON public.org_members(org_id);
 CREATE INDEX IF NOT EXISTS idx_org_members_user_id ON public.org_members(user_id);
