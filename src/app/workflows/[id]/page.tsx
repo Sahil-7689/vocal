@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useQuery, useMutation } from "@apollo/client";
 import {
@@ -78,36 +78,35 @@ export default function WorkflowBuilderPage() {
 
   const rawWf = data?.workflows_by_pk || data?.workflow_by_pk;
   
-  const activeWorkflow: Workflow | null = useMemo(() => {
-    if (!rawWf) return null;
-    return {
-      id: rawWf.id,
-      organizationId: rawWf.org_id || rawWf.organizationId,
-      name: rawWf.name,
-      description: rawWf.description,
-      status: rawWf.status,
-      createdAt: rawWf.created_at || rawWf.createdAt,
-      updatedAt: rawWf.updated_at || rawWf.updatedAt,
-      createdBy: rawWf.created_by || rawWf.createdBy,
-      steps: (rawWf.steps || []).map((s: any) => ({
-        id: s.id,
-        workflowId: s.workflow_id || s.workflowId,
-        type: s.type,
-        name: s.name,
-        positionX: s.position_x || s.positionX || 300,
-        positionY: s.position_y || s.positionY || 150,
-        config: s.config,
-        nextStepId: s.next_step_id || s.nextStepId,
-      })),
-      triggers: (rawWf.triggers || []).map((t: any) => ({
-        id: t.id,
-        workflowId: t.workflow_id || t.workflowId,
-        type: t.type,
-        config: t.config,
-        isRestricted: !t.enabled,
-      })),
-    };
-  }, [rawWf]);
+  const activeWorkflow: Workflow | null = rawWf
+    ? {
+        id: rawWf.id,
+        organizationId: rawWf.org_id || rawWf.organizationId,
+        name: rawWf.name,
+        description: rawWf.description,
+        status: rawWf.status,
+        createdAt: rawWf.created_at || rawWf.createdAt,
+        updatedAt: rawWf.updated_at || rawWf.updatedAt,
+        createdBy: rawWf.created_by || rawWf.createdBy,
+        steps: (rawWf.steps || []).map((s: any) => ({
+          id: s.id,
+          workflowId: s.workflow_id || s.workflowId,
+          type: s.type,
+          name: s.name,
+          positionX: s.position_x || s.positionX || 300,
+          positionY: s.position_y || s.positionY || 150,
+          config: s.config,
+          nextStepId: s.next_step_id || s.nextStepId,
+        })),
+        triggers: (rawWf.triggers || []).map((t: any) => ({
+          id: t.id,
+          workflowId: t.workflow_id || t.workflowId,
+          type: t.type,
+          config: t.config,
+          isRestricted: !t.enabled,
+        })),
+      }
+    : null;
 
   // Synchronize React Flow nodes & edges from resolved active workflow
   useEffect(() => {
