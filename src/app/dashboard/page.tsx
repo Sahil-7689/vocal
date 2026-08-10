@@ -23,14 +23,18 @@ import {
 } from "lucide-react";
 
 export default function DashboardPage() {
-  const { currentUser, currentOrganization, currentRole } = useOrganization();
+  const { currentUser, currentOrganization, orgFetching } = useOrganization();
 
   const { data: wfData, loading: wfLoading } = useQuery(GET_WORKFLOWS, {
     variables: { orgId: currentOrganization.id },
+    skip: !currentOrganization?.id || orgFetching,
+    fetchPolicy: "cache-and-network",
   });
 
   const { data: runsData, loading: runsLoading } = useQuery(GET_RUNS, {
     variables: { orgId: currentOrganization.id },
+    skip: !currentOrganization?.id || orgFetching,
+    fetchPolicy: "cache-and-network",
   });
 
   const workflows: Workflow[] = wfData?.workflows || [];

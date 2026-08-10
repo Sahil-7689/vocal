@@ -25,8 +25,8 @@ import {
 import { toast } from "sonner";
 
 export default function WorkflowsPage() {
-  const { currentOrganization } = useOrganization();
-  const { canCreateWorkflow, canEditWorkflow, canDeleteWorkflow, canRunWorkflow, isViewer } =
+  const { currentOrganization, orgFetching } = useOrganization();
+  const { canCreateWorkflow, canDeleteWorkflow, canRunWorkflow } =
     usePermissions();
 
   const [searchTerm, setSearchTerm] = useState("");
@@ -34,6 +34,8 @@ export default function WorkflowsPage() {
 
   const { data, loading, refetch } = useQuery(GET_WORKFLOWS, {
     variables: { orgId: currentOrganization.id },
+    skip: !currentOrganization?.id || orgFetching,
+    fetchPolicy: "cache-and-network",
   });
 
   const [deleteWorkflow] = useMutation(DELETE_WORKFLOW);

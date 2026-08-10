@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useMutation } from "@apollo/client";
 import { useOrganization } from "@/context/OrganizationContext";
 import { CREATE_WORKFLOW } from "@/graphql/mutations/workflows";
+import { GET_WORKFLOWS } from "@/graphql/queries/workflows";
 import { toast } from "sonner";
 import Link from "next/link";
 
@@ -14,7 +15,10 @@ export default function NewWorkflowPage() {
   const createdRef = useRef(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const [createWorkflowMutation, { loading }] = useMutation(CREATE_WORKFLOW);
+  const [createWorkflowMutation, { loading }] = useMutation(CREATE_WORKFLOW, {
+    refetchQueries: [{ query: GET_WORKFLOWS, variables: { orgId: currentOrganization.id } }],
+    awaitRefetchQueries: true,
+  });
 
   useEffect(() => {
     if (!currentOrganization.id || createdRef.current) return;
