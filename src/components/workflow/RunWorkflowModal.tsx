@@ -31,6 +31,19 @@ const TRIGGER_WORKFLOW_RUN_WITH_STEPS = gql`
   }
 `;
 
+const TRIGGER_WORKFLOW_RUN_ONLY = gql`
+  mutation TriggerWorkflowRunOnly($workflowId: uuid!, $orgId: uuid!, $status: String!) {
+    insert_workflow_runs_one(object: {
+      workflow_id: $workflowId
+      org_id: $orgId
+      status: $status
+      triggered_by: "Manual Trigger"
+    }) {
+      id
+    }
+  }
+`;
+
 export const RunWorkflowModal: React.FC<RunWorkflowModalProps> = ({
   workflowId,
   workflowName,
@@ -39,7 +52,8 @@ export const RunWorkflowModal: React.FC<RunWorkflowModalProps> = ({
 }) => {
   const router = useRouter();
   const { currentOrganization } = useOrganization();
-  const [triggerRunMutation, { loading }] = useMutation(TRIGGER_WORKFLOW_RUN_WITH_STEPS);
+  const [triggerRunWithStepsMutation, { loading: loadingSteps }] = useMutation(TRIGGER_WORKFLOW_RUN_WITH_STEPS);
+  const [triggerRunOnlyMutation, { loading: loadingOnly }] = useMutation(TRIGGER_WORKFLOW_RUN_ONLY);
 
   const { data: wfData } = useQuery(GET_WORKFLOW, {
     variables: { id: workflowId },
@@ -52,36 +66,42 @@ export const RunWorkflowModal: React.FC<RunWorkflowModalProps> = ({
     typeof id === "string" &&
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 
+  const loading = loadingSteps || loadingOnly;
+
   const handleRun = async () => {
     try {
       const steps = wfData?.workflows_by_pk?.steps || wfData?.workflow_by_pk?.steps || [];
-      const stepRunsData = steps.length > 0
-        ? steps.map((s: any) => ({
-            ...(isValidUuid(s.id) ? { workflow_step_id: s.id } : {}),
-            status: s.type === "approval_gate" ? "paused" : "completed",
-            input: s.config || { text: "Workflow run initiated." },
-            output: { status: "success", step: s.name || "Workflow Step" },
-            attempt_count: 1,
-          }))
-        : [
-            {
-              status: "completed",
-              input: { text: "Workflow run initiated." },
-              output: { status: "success", step: "AI Processing Step" },
-              attempt_count: 1,
-            },
-          ];
+      const validSteps = steps.filter((s: any) => s.id && isValidUuid(s.id));
 
-      const runStatus = stepRunsData.some((sr: any) => sr.status === "paused") ? "paused" : "completed";
+      let res;
+      if (validSteps.length > 0) {
+        const stepRunsData = validSteps.map((s: any) => ({
+          workflow_step_id: s.id,
+          status: s.type === "approval_gate" ? "paused" : "completed",
+          input: s.config || { text: "Workflow run initiated." },
+          output: { status: "success", step: s.name || "Workflow Step" },
+          attempt_count: 1,
+        }));
 
-      const res = await triggerRunMutation({
-        variables: {
-          workflowId,
-          orgId: currentOrganization.id,
-          status: runStatus,
-          stepRunsData,
-        },
-      });
+        const runStatus = stepRunsData.some((sr: any) => sr.status === "paused") ? "paused" : "completed";
+
+        res = await triggerRunWithStepsMutation({
+          variables: {
+            workflowId,
+            orgId: currentOrganization.id,
+            status: runStatus,
+            stepRunsData,
+          },
+        });
+      } else {
+        res = await triggerRunOnlyMutation({
+          variables: {
+            workflowId,
+            orgId: currentOrganization.id,
+            status: "completed",
+          },
+        });
+      }
 
       const newRunId = res?.data?.insert_workflow_runs_one?.id;
       if (newRunId) {
