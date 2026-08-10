@@ -9,7 +9,7 @@ import handleDatabaseEventTrigger from "./database-event-trigger/index";
 const app = express();
 app.use(express.json());
 
-// CORS headers for local development
+// CORS headers for development
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
   res.header("Access-Control-Allow-Headers", "*");
@@ -33,7 +33,7 @@ app.get("/health", (req, res) => {
 
 const PORT = process.env.PORT || 4000;
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`\n🚀 VocalFlow Backend Engine running at http://localhost:${PORT}`);
   console.log(`   - Trigger Action:          POST http://localhost:${PORT}/v1/trigger-workflow-run`);
   console.log(`   - Approve Action:          POST http://localhost:${PORT}/v1/approve-step`);
@@ -41,4 +41,14 @@ app.listen(PORT, () => {
   console.log(`   - Scheduled Trigger:       POST http://localhost:${PORT}/v1/scheduled-trigger`);
   console.log(`   - Database Event Trigger:  POST http://localhost:${PORT}/v1/database-event-trigger`);
   console.log(`   - Webhook Trigger:         POST http://localhost:${PORT}/webhook/:workflow_id\n`);
+});
+
+server.on("error", (err: any) => {
+  if (err.code === "EADDRINUSE") {
+    console.log(`\n✅ Port ${PORT} is already in use by an active VocalFlow server process.`);
+    console.log(`   The VocalFlow Backend Engine is ALREADY running and healthy at http://localhost:${PORT}/health\n`);
+    process.exit(0);
+  } else {
+    throw err;
+  }
 });
