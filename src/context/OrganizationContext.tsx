@@ -218,9 +218,23 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   };
 
   const completeOnboarding = (orgName: string, customOrgId?: string) => {
-    const newOrgId = customOrgId || `org-${Date.now()}`;
+    // GUARD: customOrgId MUST be a valid PostgreSQL UUID.
+    // If it looks like a fake fallback (e.g. "org-1234567890") refuse it and log an error.
+    const isValidUuid = customOrgId &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(customOrgId);
+
+    if (!isValidUuid) {
+      console.error(
+        "[OrganizationContext] completeOnboarding called without a valid UUID org_id.",
+        "Got:", customOrgId,
+        "The backend create-organization function must return a real PostgreSQL UUID."
+      );
+      // Do NOT proceed with a fake org ID — it will break all Hasura operations.
+      return;
+    }
+
     const newOrg: Organization = {
-      id: newOrgId,
+      id: customOrgId,
       name: orgName,
       slug: orgName.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
       quotaLimit: 100,
@@ -229,8 +243,8 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     };
 
     const newMember: OrgMember = {
-      id: `member-${Date.now()}`,
-      organizationId: newOrgId,
+      id: `member-${customOrgId}`,
+      organizationId: customOrgId,
       userId: currentUser.id,
       role: "owner",
       user: currentUser,
@@ -239,7 +253,7 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
     setOrganizations((prev) => [newOrg, ...prev]);
     setMembers((prev) => [newMember, ...prev]);
-    setCurrentOrgId(newOrgId);
+    setCurrentOrgId(customOrgId);
     setPendingOnboarding(false);
   };
 

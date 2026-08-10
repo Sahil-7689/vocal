@@ -31,9 +31,7 @@ export default function OnboardingPage() {
     formState: { errors },
   } = useForm<OnboardingFormValues>({
     resolver: zodResolver(onboardingSchema),
-    defaultValues: {
-      name: "",
-    },
+    defaultValues: { name: "" },
   });
 
   const onSubmit = async (data: OnboardingFormValues) => {
@@ -42,9 +40,10 @@ export default function OnboardingPage() {
 
     try {
       const token = getAccessToken();
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
+      const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000").replace(/\/$/, "");
 
-      // 1. Call secure backend endpoint to create Organization + Owner membership atomically
+      // Call secure backend function to create Organization + Owner membership atomically.
+      // This returns a real PostgreSQL UUID for org_id.
       const res = await fetch(`${apiUrl}/v1/create-organization`, {
         method: "POST",
         headers: {
@@ -57,18 +56,37 @@ export default function OnboardingPage() {
 
       const result = await res.json();
 
-      if (res.ok && result.org_id) {
-        completeOnboarding(result.name, result.org_id);
-      } else {
-        completeOnboarding(data.name);
+      if (!res.ok) {
+        // Show the real error to the user — do NOT fall back to fake org IDs
+        const errMsg =
+          result?.error ||
+          result?.message ||
+          `Organization creation failed (HTTP ${res.status}). Check backend is running.`;
+        setErrorMessage(errMsg);
+        toast.error(errMsg);
+        return;
       }
+
+      if (!result.org_id) {
+        const errMsg = "Organization creation succeeded but no org_id was returned from the backend.";
+        setErrorMessage(errMsg);
+        toast.error(errMsg);
+        return;
+      }
+
+      // Pass the real PostgreSQL UUID org_id to context
+      completeOnboarding(result.name || data.name, result.org_id);
 
       toast.success(`Organization "${data.name}" created! Role assigned: Owner`);
       router.push("/dashboard");
     } catch (err: any) {
-      completeOnboarding(data.name);
-      toast.success(`Organization "${data.name}" created! Role assigned: Owner`);
-      router.push("/dashboard");
+      // Network error — do NOT silently create fake org ID
+      const errMsg =
+        err?.message?.includes("fetch")
+          ? "Cannot reach the backend server. Make sure the backend is running at http://localhost:4000"
+          : err?.message || "Unexpected error creating organization.";
+      setErrorMessage(errMsg);
+      toast.error(errMsg);
     } finally {
       setLoading(false);
     }
@@ -94,7 +112,7 @@ export default function OnboardingPage() {
         </div>
 
         {errorMessage && (
-          <div className="p-3 rounded-lg bg-error-container/30 border border-error/40 text-xs text-error font-mono">
+          <div className="p-3 rounded-lg bg-error-container/30 border border-error/40 text-xs text-error font-mono break-words">
             {errorMessage}
           </div>
         )}
