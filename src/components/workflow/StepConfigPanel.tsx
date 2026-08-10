@@ -84,6 +84,8 @@ export const StepConfigPanel: React.FC = () => {
     },
   });
 
+  const tempVal = watch("temperature") ?? 0.7;
+
   useEffect(() => {
     if (selectedNode) {
       const dataObj = (selectedNode.data as any) || {};
@@ -114,8 +116,6 @@ export const StepConfigPanel: React.FC = () => {
   }, [selectedNodeId, selectedNode, reset]);
 
   if (!selectedNode) return null;
-
-  const tempVal = watch("temperature") ?? 0.7;
 
   const onSubmit = (values: StepConfigFormValues) => {
     if (!canEditWorkflow()) {
