@@ -48,15 +48,19 @@ export const RunWorkflowModal: React.FC<RunWorkflowModalProps> = ({
 
   if (!isOpen) return null;
 
+  const isValidUuid = (id: string) =>
+    typeof id === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+
   const handleRun = async () => {
     try {
       const steps = wfData?.workflows_by_pk?.steps || wfData?.workflow_by_pk?.steps || [];
       const stepRunsData = steps.length > 0
         ? steps.map((s: any) => ({
-            workflow_step_id: s.id,
+            ...(isValidUuid(s.id) ? { workflow_step_id: s.id } : {}),
             status: s.type === "approval_gate" ? "paused" : "completed",
             input: s.config || { text: "Workflow run initiated." },
-            output: { status: "success", step: s.name },
+            output: { status: "success", step: s.name || "Workflow Step" },
             attempt_count: 1,
           }))
         : [
