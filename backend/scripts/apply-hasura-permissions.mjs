@@ -279,7 +279,7 @@ const orgMemberFilter = {
 async function applyPermissions() {
   console.log("\n📋 Applying permissions...");
 
-  // organizations SELECT
+  // organizations SELECT & INSERT
   for (const role of ["user", "owner", "editor", "viewer"]) {
     await apply({
       type: "pg_create_select_permission",
@@ -294,6 +294,32 @@ async function applyPermissions() {
       },
     }, `organizations:${role} SELECT`);
   }
+  await apply({
+    type: "pg_create_insert_permission",
+    args: {
+      source: "default",
+      table: { schema: "public", name: "organizations" },
+      role: "user",
+      permission: {
+        columns: ["name", "quota_allowed", "quota_used"],
+        check: {},
+      },
+    },
+  }, "organizations:user INSERT");
+
+  // org_members SELECT & INSERT
+  await apply({
+    type: "pg_create_insert_permission",
+    args: {
+      source: "default",
+      table: { schema: "public", name: "org_members" },
+      role: "user",
+      permission: {
+        columns: ["org_id", "user_id", "role"],
+        check: { user_id: { _eq: "X-Hasura-User-Id" } },
+      },
+    },
+  }, "org_members:user INSERT");
 
   // org_members SELECT
   for (const role of ["user", "owner"]) {

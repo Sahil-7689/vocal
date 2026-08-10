@@ -4,15 +4,17 @@ import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
-import { getAccessToken, getCurrentUser } from "@/lib/auth";
+import * as z from "zod";
 import { useOrganization } from "@/context/OrganizationContext";
-import { ShaderBackground } from "@/components/layout/ShaderBackground";
-import { Building2, ArrowRight, Loader2, ShieldCheck } from "lucide-react";
+import { getAccessToken, getCurrentUser } from "@/lib/auth";
+import { Building2, Sparkles, Loader2, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
 
 const onboardingSchema = z.object({
-  name: z.string().min(2, "Organization name must be at least 2 characters"),
+  name: z
+    .string()
+    .min(2, "Organization name must be at least 2 characters")
+    .max(50, "Organization name must be less than 50 characters"),
 });
 
 type OnboardingFormValues = z.infer<typeof onboardingSchema>;
@@ -31,19 +33,20 @@ export default function OnboardingPage() {
     formState: { errors },
   } = useForm<OnboardingFormValues>({
     resolver: zodResolver(onboardingSchema),
-    defaultValues: { name: "" },
+    defaultValues: {
+      name: "",
+    },
   });
 
   const onSubmit = async (data: OnboardingFormValues) => {
     setLoading(true);
     setErrorMessage(null);
 
-    try {
-      const token = getAccessToken();
-      const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000").replace(/\/$/, "");
+    const token = getAccessToken();
+    const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000").replace(/\/$/, "");
 
-      // Call secure backend function to create Organization + Owner membership atomically.
-      // This returns a real PostgreSQL UUID for org_id.
+    // 1. Try local Express backend API first
+    try {
       const res = await fetch(`${apiUrl}/v1/create-organization`, {
         method: "POST",
         headers: {
@@ -56,35 +59,73 @@ export default function OnboardingPage() {
 
       const result = await res.json();
 
-      if (!res.ok) {
-        // Show the real error to the user — do NOT fall back to fake org IDs
-        const errMsg =
-          result?.error ||
-          result?.message ||
-          `Organization creation failed (HTTP ${res.status}). Check backend is running.`;
-        setErrorMessage(errMsg);
-        toast.error(errMsg);
+      if (res.ok && result.org_id) {
+        completeOnboarding(result.name || data.name, result.org_id);
+        toast.success(`Organization "${data.name}" created! Role assigned: Owner`);
+        router.push("/dashboard");
+        return;
+      }
+    } catch (err) {
+      // Ignore network error for local Express server — fallback to direct Hasura GraphQL below
+    }
+
+    // 2. Direct Hasura GraphQL Fallback (for live production Vercel deployment)
+    try {
+      const graphqlUrl =
+        (process.env.NEXT_PUBLIC_GRAPHQL_URL || "").trim().replace(".graphql.", ".hasura.") ||
+        (process.env.NEXT_PUBLIC_NHOST_SUBDOMAIN
+          ? `https://${process.env.NEXT_PUBLIC_NHOST_SUBDOMAIN}.hasura.${process.env.NEXT_PUBLIC_NHOST_REGION || "us-east-1"}.nhost.run/v1/graphql`
+          : "");
+
+      if (!graphqlUrl) {
+        throw new Error("No GraphQL URL configured.");
+      }
+
+      const gqlRes = await fetch(graphqlUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(currentUser?.id ? { "x-hasura-user-id": currentUser.id } : {}),
+          "x-hasura-role": "user",
+        },
+        body: JSON.stringify({
+          query: `mutation CreateOrganizationDirect($name: String!, $userId: uuid!) {
+            insert_organizations_one(object: {
+              name: $name
+              quota_allowed: 100
+              quota_used: 0
+              members: {
+                data: [{
+                  user_id: $userId
+                  role: "owner"
+                }]
+              }
+            }) {
+              id
+              name
+            }
+          }`,
+          variables: { name: data.name, userId: currentUser?.id },
+        }),
+      });
+
+      const gqlJson = await gqlRes.json();
+      const newOrg = gqlJson?.data?.insert_organizations_one;
+
+      if (newOrg?.id) {
+        completeOnboarding(newOrg.name || data.name, newOrg.id);
+        toast.success(`Organization "${data.name}" created! Role assigned: Owner`);
+        router.push("/dashboard");
         return;
       }
 
-      if (!result.org_id) {
-        const errMsg = "Organization creation succeeded but no org_id was returned from the backend.";
-        setErrorMessage(errMsg);
-        toast.error(errMsg);
-        return;
+      if (gqlJson?.errors?.length) {
+        throw new Error(gqlJson.errors[0].message);
       }
-
-      // Pass the real PostgreSQL UUID org_id to context
-      completeOnboarding(result.name || data.name, result.org_id);
-
-      toast.success(`Organization "${data.name}" created! Role assigned: Owner`);
-      router.push("/dashboard");
+      throw new Error("Unable to create organization.");
     } catch (err: any) {
-      // Network error — do NOT silently create fake org ID
-      const errMsg =
-        err?.message?.includes("fetch")
-          ? "Cannot reach the backend server. Make sure the backend is running at http://localhost:4000"
-          : err?.message || "Unexpected error creating organization.";
+      const errMsg = err?.message || "Failed to create organization. Please try again.";
       setErrorMessage(errMsg);
       toast.error(errMsg);
     } finally {
@@ -93,61 +134,44 @@ export default function OnboardingPage() {
   };
 
   return (
-    <div className="relative min-h-screen w-full flex items-center justify-center p-4 overflow-hidden bg-background">
-      {/* WebGL Shader Canvas Background */}
-      <ShaderBackground />
-
-      <div className="relative z-10 w-full max-w-md bg-surface-container-lowest/95 backdrop-blur-xl border border-outline-variant/60 rounded-2xl p-8 shadow-2xl space-y-6 animate-fade-up">
-        {/* Header */}
+    <div className="min-h-screen flex items-center justify-center bg-background text-on-surface p-6 relative overflow-hidden">
+      <div className="max-w-md w-full bg-surface-container-lowest border border-outline-variant/60 rounded-2xl p-8 shadow-xl space-y-6 animate-fade-up relative z-10">
         <div className="text-center space-y-2">
-          <div className="w-12 h-12 bg-primary rounded-xl flex items-center justify-center mx-auto shadow-md">
-            <Building2 className="w-7 h-7 text-on-primary" />
+          <div className="w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center mx-auto">
+            <Building2 className="w-6 h-6" />
           </div>
-          <h1 className="font-display font-bold text-2xl text-on-surface">
-            Welcome to VocalFlow
-          </h1>
-          <p className="font-mono text-xs text-on-surface-variant">
-            Create your organization to get started
+          <h1 className="font-display font-bold text-2xl text-on-surface">Welcome to VocalFlow</h1>
+          <p className="text-xs text-on-surface-variant">
+            Create an organization to start building and managing AI workflows.
           </p>
         </div>
 
         {errorMessage && (
-          <div className="p-3 rounded-lg bg-error-container/30 border border-error/40 text-xs text-error font-mono break-words">
+          <div className="p-3 rounded-lg bg-error/10 border border-error/30 text-xs text-error font-mono break-words">
             {errorMessage}
           </div>
         )}
 
-        {/* Onboarding Form */}
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 text-xs">
-          <div className="space-y-1">
-            <label className="block font-mono text-[11px] text-on-surface-variant font-medium">
-              Organization Name
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-on-surface flex items-center justify-between">
+              <span>Organization Name</span>
+              <span className="text-[10px] text-on-surface-variant font-mono">Role: Owner</span>
             </label>
-            <div className="relative">
-              <Building2 className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant" />
-              <input
-                {...register("name")}
-                type="text"
-                placeholder="Acme AI Technologies"
-                className="w-full h-10 pl-9 pr-3 rounded-lg bg-surface-container-low border border-outline-variant/60 focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all font-mono text-xs"
-              />
-            </div>
+            <input
+              {...register("name")}
+              placeholder="e.g. Acme AI Studio"
+              className="w-full h-10 px-3 rounded-lg bg-surface-container-low border border-outline-variant/60 text-xs font-mono focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+            />
             {errors.name && (
-              <span className="text-[10px] text-error font-mono">{errors.name.message}</span>
+              <p className="text-[11px] text-error font-mono mt-1">{errors.name.message}</p>
             )}
-          </div>
-
-          <div className="p-3 rounded-lg bg-primary/10 border border-primary/20 flex items-start gap-2.5 text-xs text-on-surface">
-            <ShieldCheck className="w-4 h-4 text-primary shrink-0 mt-0.5" />
-            <p className="text-[11px] leading-relaxed text-on-surface-variant font-mono">
-              As creator, you will automatically be assigned the <strong className="text-primary font-bold">Owner</strong> role with full workflow &amp; team permissions.
-            </p>
           </div>
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full h-10 rounded-lg bg-primary hover:bg-primary-container text-on-primary font-mono text-xs font-semibold flex items-center justify-center gap-2 shadow-md transition-all active:scale-[0.98] disabled:opacity-50"
+            className="w-full h-10 rounded-lg bg-primary hover:bg-primary-container text-on-primary font-mono text-xs font-semibold flex items-center justify-center gap-2 shadow-md transition-all disabled:opacity-50"
           >
             {loading ? (
               <>
@@ -156,12 +180,19 @@ export default function OnboardingPage() {
               </>
             ) : (
               <>
-                Create Organization
+                <span>Complete Setup</span>
                 <ArrowRight className="w-4 h-4" />
               </>
             )}
           </button>
         </form>
+
+        <div className="pt-4 border-t border-outline-variant/40 text-center">
+          <p className="text-[11px] text-on-surface-variant font-mono flex items-center justify-center gap-1">
+            <Sparkles className="w-3.5 h-3.5 text-primary" />
+            <span>Includes 100 free monthly execution quota</span>
+          </p>
+        </div>
       </div>
     </div>
   );
