@@ -112,7 +112,37 @@ export default async function handleTriggerWorkflowRun(req: Request, res: Respon
       { workflowId: workflow_id }
     );
 
-    const steps = stepsRes.workflow_steps || [];
+    let steps = stepsRes.workflow_steps || [];
+
+    // Fallback: If workflow has 0 steps in database (e.g. created prior to step persistence),
+    // automatically insert a default LLM processing step so execution always has steps!
+    if (steps.length === 0) {
+      const defaultStepRes = await graphqlAdmin<{
+        insert_workflow_steps_one: WorkflowStep;
+      }>(
+        `mutation InsertDefaultStep($workflowId: uuid!) {
+          insert_workflow_steps_one(object: {
+            workflow_id: $workflowId
+            position: 1
+            name: "AI Processing Step"
+            type: "llm_call"
+            config: { provider: "openai", model: "gpt-4o", prompt: "Analyze workflow input data." }
+          }) {
+            id
+            workflow_id
+            position
+            name
+            type
+            config
+          }
+        }`,
+        { workflowId: workflow_id }
+      );
+      if (defaultStepRes?.insert_workflow_steps_one) {
+        steps = [defaultStepRes.insert_workflow_steps_one];
+      }
+    }
+
     let prevOutput: any = input || { text: "Workflow triggered.", triggeredBy: userId };
     let isPaused = false;
     let executionFailed = false;
