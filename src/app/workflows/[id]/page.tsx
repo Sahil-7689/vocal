@@ -130,30 +130,39 @@ export default function WorkflowBuilderPage() {
         ];
       }
 
-      // Map steps to React Flow nodes
-      const initialNodes: Node[] = stepList.map((step, idx) => ({
-        id: step.id,
-        type: "customStepNode",
-        position: {
-          x: step.positionX || 300 + idx * 300,
-          y: step.positionY || 150,
-        },
-        data: {
-          id: step.id,
-          type: step.type,
-          name: step.name,
-          config: step.config,
-        },
-      }));
+      // Map steps to React Flow nodes with distinct non-overlapping positions
+      const initialNodes: Node[] = stepList.map((step, idx) => {
+        // Calculate non-overlapping grid layout if positionX/positionY are default or identical
+        const posX = (step.positionX && step.positionX !== 300)
+          ? step.positionX
+          : 250 + (idx % 3) * 320;
+        const posY = (step.positionY && step.positionY !== 150)
+          ? step.positionY
+          : 150 + Math.floor(idx / 3) * 160;
 
-      // Generate connecting edges from nextStepId
+        return {
+          id: step.id,
+          type: "customStepNode",
+          position: { x: posX, y: posY },
+          data: {
+            id: step.id,
+            type: step.type,
+            name: step.name,
+            config: step.config,
+          },
+        };
+      });
+
+      // Generate connecting edges between sequential steps
       const initialEdges: Edge[] = [];
-      stepList.forEach((step) => {
-        if (step.nextStepId) {
+      stepList.forEach((step, idx) => {
+        const nextStep = stepList[idx + 1];
+        const targetId = step.nextStepId || (nextStep ? nextStep.id : null);
+        if (targetId) {
           initialEdges.push({
-            id: `e-${step.id}-${step.nextStepId}`,
+            id: `e-${step.id}-${targetId}`,
             source: step.id,
-            target: step.nextStepId,
+            target: targetId,
             animated: true,
             style: { stroke: "#6366f1", strokeWidth: 2 },
           });

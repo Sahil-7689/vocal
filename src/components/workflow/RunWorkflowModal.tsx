@@ -2,7 +2,8 @@
 
 import React from "react";
 import { useRouter } from "next/navigation";
-import { useMutation, gql } from "@apollo/client";
+import { useQuery, useMutation, gql } from "@apollo/client";
+import { GET_WORKFLOW } from "@/graphql/queries/workflows";
 import { useOrganization } from "@/context/OrganizationContext";
 import { Play, AlertCircle, Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -14,13 +15,16 @@ interface RunWorkflowModalProps {
   onClose: () => void;
 }
 
-const TRIGGER_WORKFLOW_RUN_DIRECT = gql`
-  mutation TriggerWorkflowRunDirect($workflowId: uuid!, $orgId: uuid!) {
+const TRIGGER_WORKFLOW_RUN_WITH_STEPS = gql`
+  mutation TriggerWorkflowRunWithSteps($workflowId: uuid!, $orgId: uuid!, $status: String!, $stepRunsData: [step_runs_insert_input!]!) {
     insert_workflow_runs_one(object: {
       workflow_id: $workflowId
       org_id: $orgId
-      status: "completed"
+      status: $status
       triggered_by: "Manual Trigger"
+      step_runs: {
+        data: $stepRunsData
+      }
     }) {
       id
     }
@@ -35,16 +39,43 @@ export const RunWorkflowModal: React.FC<RunWorkflowModalProps> = ({
 }) => {
   const router = useRouter();
   const { currentOrganization } = useOrganization();
-  const [triggerRunMutation, { loading }] = useMutation(TRIGGER_WORKFLOW_RUN_DIRECT);
+  const [triggerRunMutation, { loading }] = useMutation(TRIGGER_WORKFLOW_RUN_WITH_STEPS);
+
+  const { data: wfData } = useQuery(GET_WORKFLOW, {
+    variables: { id: workflowId },
+    skip: !isOpen || !workflowId,
+  });
 
   if (!isOpen) return null;
 
   const handleRun = async () => {
     try {
+      const steps = wfData?.workflows_by_pk?.steps || wfData?.workflow_by_pk?.steps || [];
+      const stepRunsData = steps.length > 0
+        ? steps.map((s: any) => ({
+            workflow_step_id: s.id,
+            status: s.type === "approval_gate" ? "paused" : "completed",
+            input: s.config || { text: "Workflow run initiated." },
+            output: { status: "success", step: s.name },
+            attempt_count: 1,
+          }))
+        : [
+            {
+              status: "completed",
+              input: { text: "Workflow run initiated." },
+              output: { status: "success", step: "AI Processing Step" },
+              attempt_count: 1,
+            },
+          ];
+
+      const runStatus = stepRunsData.some((sr: any) => sr.status === "paused") ? "paused" : "completed";
+
       const res = await triggerRunMutation({
         variables: {
           workflowId,
           orgId: currentOrganization.id,
+          status: runStatus,
+          stepRunsData,
         },
       });
 
