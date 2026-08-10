@@ -1,37 +1,11 @@
 import { nhost } from "./nhost";
 
-const isLiveBackend = () =>
-  Boolean(
-    (process.env.NEXT_PUBLIC_GRAPHQL_URL || "").trim() ||
-      (process.env.NEXT_PUBLIC_NHOST_SUBDOMAIN || "").trim()
-  );
-
-let activeLocalUser: any = null;
-
-function resolvePreseededUserId(email: string): string {
-  const e = (email || "").toLowerCase().trim();
-  if (e.includes("owner.a") || e.includes("sahil@vocalflow.ai")) return "user-owner-1";
-  if (e.includes("editor.a") || e.includes("editor@vocalflow.ai")) return "user-editor-1";
-  if (e.includes("viewer.a") || e.includes("viewer@vocalflow.ai")) return "user-viewer-1";
-  if (e.includes("owner.b") || e.includes("cyberdyne@orgb.ai")) return "user-orgb-1";
-  return `user-local-${Date.now()}`;
-}
+/**
+ * Real Nhost Authentication Helper Module
+ * Strictly enforces real Nhost Auth for login, signup, session tokens, and signout.
+ */
 
 export async function loginWithEmailPassword(email: string, password: string) {
-  if (!isLiveBackend()) {
-    const userId = resolvePreseededUserId(email);
-    const user = {
-      id: userId,
-      email,
-      displayName: email.split("@")[0],
-    };
-    activeLocalUser = user;
-    if (typeof window !== "undefined") {
-      localStorage.setItem("vocalflow_local_user", JSON.stringify(user));
-    }
-    return { user };
-  }
-
   try {
     if (nhost.auth.isAuthenticated()) {
       await nhost.auth.signOut();
@@ -41,6 +15,7 @@ export async function loginWithEmailPassword(email: string, password: string) {
       email,
       password,
     });
+
     if (res.error) {
       throw new Error(res.error.message);
     }
@@ -51,20 +26,6 @@ export async function loginWithEmailPassword(email: string, password: string) {
 }
 
 export async function signUpWithEmailPassword(email: string, password: string, displayName?: string) {
-  if (!isLiveBackend()) {
-    const userId = resolvePreseededUserId(email);
-    const user = {
-      id: userId,
-      email,
-      displayName: displayName || email.split("@")[0],
-    };
-    activeLocalUser = user;
-    if (typeof window !== "undefined") {
-      localStorage.setItem("vocalflow_local_user", JSON.stringify(user));
-    }
-    return { user, session: { user } };
-  }
-
   try {
     if (nhost.auth.isAuthenticated()) {
       await nhost.auth.signOut();
@@ -105,13 +66,6 @@ export async function signUpWithEmailPassword(email: string, password: string, d
 }
 
 export async function logoutUser() {
-  activeLocalUser = null;
-  if (typeof window !== "undefined") {
-    localStorage.removeItem("vocalflow_local_user");
-    sessionStorage.removeItem("vocalflow_local_user");
-  }
-  if (!isLiveBackend()) return;
-
   try {
     await nhost.auth.signOut();
   } catch (err: any) {
@@ -120,18 +74,6 @@ export async function logoutUser() {
 }
 
 export function getCurrentUser() {
-  if (!isLiveBackend()) {
-    if (typeof window !== "undefined") {
-      const stored = localStorage.getItem("vocalflow_local_user") || sessionStorage.getItem("vocalflow_local_user");
-      if (stored) {
-        try {
-          return JSON.parse(stored);
-        } catch (e) {}
-      }
-    }
-    return activeLocalUser;
-  }
-
   try {
     return nhost.auth.getUser();
   } catch (err) {
@@ -140,8 +82,6 @@ export function getCurrentUser() {
 }
 
 export function getAccessToken() {
-  if (!isLiveBackend()) return null;
-
   try {
     return nhost.auth.getAccessToken();
   } catch (err) {

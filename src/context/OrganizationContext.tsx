@@ -3,8 +3,7 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
 import { useAuthenticationStatus, useUserData } from "@nhost/react";
 import { Organization, OrgMember, OrgRole, User } from "@/types";
-import { getCurrentUser } from "@/lib/auth";
-import { MOCK_ORGANIZATIONS, MOCK_MEMBERS } from "@/lib/mockBackend";
+import { getCurrentUser, getAccessToken } from "@/lib/auth";
 
 interface OrganizationContextType {
   currentUser: User;
@@ -32,7 +31,7 @@ const fallbackOrg: Organization = {
   id: "org-default",
   name: "My Organization",
   slug: "my-organization",
-  quotaLimit: 10000,
+  quotaLimit: 100,
   quotaUsed: 0,
   createdAt: new Date().toISOString(),
 };
@@ -57,12 +56,11 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   const [currentUser, setCurrentUser] = useState<User>(fallbackUser);
   const [currentOrgId, setCurrentOrgId] = useState<string | null>(null);
-  const [organizations, setOrganizations] = useState<Organization[]>(MOCK_ORGANIZATIONS);
-  const [members, setMembers] = useState<OrgMember[]>(MOCK_MEMBERS);
-  // pendingOnboarding is set to true right after signup, cleared after completeOnboarding
+  const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [members, setMembers] = useState<OrgMember[]>([]);
   const [pendingOnboarding, setPendingOnboarding] = useState(false);
 
-  // Sync currentUser from live Nhost session whenever auth state changes
+  // 1. Sync currentUser from live Nhost session
   useEffect(() => {
     if (nhostUser && isAuthenticated) {
       setCurrentUser({
@@ -71,15 +69,14 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         displayName: nhostUser.displayName || nhostUser.email || "User",
         avatarUrl: nhostUser.avatarUrl || fallbackUser.avatarUrl,
       });
-    } else if (!isAuthenticated) {
-      // Only reset if we're not mid-onboarding (local/standalone mode)
-      const localUser = getCurrentUser();
-      if (localUser) {
+    } else {
+      const active = getCurrentUser();
+      if (active) {
         setCurrentUser({
-          id: localUser.id,
-          email: localUser.email || "",
-          displayName: localUser.displayName || localUser.email || "User",
-          avatarUrl: localUser.avatarUrl || fallbackUser.avatarUrl,
+          id: active.id,
+          email: active.email || "",
+          displayName: active.displayName || active.email || "User",
+          avatarUrl: active.avatarUrl || fallbackUser.avatarUrl,
         });
       } else {
         setCurrentUser(fallbackUser);
@@ -87,12 +84,103 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }
   }, [nhostUser, isAuthenticated]);
 
+  // 2. Fetch real org_members and organizations from PostgreSQL via Hasura GraphQL
+  useEffect(() => {
+    if (!currentUser.id || currentUser.id === "unauthenticated") {
+      setOrganizations([]);
+      setMembers([]);
+      setCurrentOrgId(null);
+      return;
+    }
+
+    async function fetchUserOrgMembers() {
+      try {
+        const token = getAccessToken();
+        const graphqlUrl =
+          (process.env.NEXT_PUBLIC_GRAPHQL_URL || "").trim() ||
+          (process.env.NEXT_PUBLIC_NHOST_SUBDOMAIN
+            ? `https://${process.env.NEXT_PUBLIC_NHOST_SUBDOMAIN}.graphql.${process.env.NEXT_PUBLIC_NHOST_REGION || "us-east-1"}.nhost.run/v1/graphql`
+            : "http://localhost:4000/v1/graphql");
+
+        const query = `
+          query GetUserOrgMembers {
+            org_members {
+              id
+              org_id
+              user_id
+              role
+              organization {
+                id
+                name
+                quota_allowed
+                quota_used
+                created_at
+              }
+            }
+          }
+        `;
+
+        const res = await fetch(graphqlUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            ...(currentUser.id ? { "x-hasura-user-id": currentUser.id } : {}),
+          },
+          body: JSON.stringify({ query }),
+        });
+
+        const json = await res.json();
+        const orgMembers = json?.data?.org_members || [];
+
+        if (Array.isArray(orgMembers) && orgMembers.length > 0) {
+          const loadedOrgs: Organization[] = [];
+          const loadedMembers: OrgMember[] = [];
+
+          for (const m of orgMembers) {
+            if (m.organization && !loadedOrgs.some((o) => o.id === m.organization.id)) {
+              loadedOrgs.push({
+                id: m.organization.id,
+                name: m.organization.name,
+                slug: m.organization.name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+                quotaLimit: m.organization.quota_allowed || 100,
+                quotaUsed: m.organization.quota_used || 0,
+                createdAt: m.organization.created_at || new Date().toISOString(),
+              });
+            }
+
+            loadedMembers.push({
+              id: m.id,
+              organizationId: m.org_id,
+              userId: m.user_id,
+              role: m.role as OrgRole,
+              user: currentUser,
+              createdAt: new Date().toISOString(),
+            });
+          }
+
+          setOrganizations(loadedOrgs);
+          setMembers(loadedMembers);
+          if (loadedOrgs.length > 0 && !currentOrgId) {
+            setCurrentOrgId(loadedOrgs[0].id);
+          }
+        } else {
+          setOrganizations([]);
+          setMembers([]);
+        }
+      } catch (err) {
+        console.error("Error fetching user org_members:", err);
+      }
+    }
+
+    fetchUserOrgMembers();
+  }, [currentUser.id]);
+
   const userMemberships =
     currentUser.id && currentUser.id !== "unauthenticated"
       ? members.filter((m) => m.userId === currentUser.id)
       : [];
 
-  // A user has an org only if they have a real membership AND are not in the middle of onboarding
   const hasOrganization = !pendingOnboarding && userMemberships.length > 0;
 
   const currentOrganization =
@@ -100,7 +188,7 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     (organizations.length > 0 ? organizations[0] : fallbackOrg);
 
   const currentMember = members.find(
-    (m) => m.organizationId === currentOrgId && m.userId === currentUser.id
+    (m) => m.organizationId === currentOrganization.id && m.userId === currentUser.id
   );
 
   const currentRole: OrgRole = currentMember ? currentMember.role : "owner";
@@ -118,15 +206,14 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   };
 
   const startOnboardingForNewUser = (user: Partial<User>) => {
-    const userId = user.id || currentUser.id || `user-new-${Date.now()}`;
+    const userId = user.id || currentUser.id || `user-${Date.now()}`;
     const newUser: User = {
       id: userId,
       email: user.email || "",
-      displayName: user.displayName || user.email?.split("@")[0] || "New User",
+      displayName: user.displayName || user.email?.split("@")[0] || "User",
       avatarUrl: fallbackUser.avatarUrl,
     };
     setCurrentUser(newUser);
-    // Signal that this user is brand-new and must complete onboarding first
     setPendingOnboarding(true);
   };
 
@@ -136,7 +223,7 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       id: newOrgId,
       name: orgName,
       slug: orgName.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
-      quotaLimit: 10000,
+      quotaLimit: 100,
       quotaUsed: 0,
       createdAt: new Date().toISOString(),
     };
@@ -153,7 +240,6 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     setOrganizations((prev) => [newOrg, ...prev]);
     setMembers((prev) => [newMember, ...prev]);
     setCurrentOrgId(newOrgId);
-    // Onboarding complete — clear the pending flag
     setPendingOnboarding(false);
   };
 
@@ -164,7 +250,7 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         currentOrganization,
         currentRole,
         organizations,
-        members: members.filter((m) => m.organizationId === currentOrgId),
+        members: members.filter((m) => m.organizationId === currentOrganization.id),
         hasOrganization,
         pendingOnboarding,
         switchOrganization,
