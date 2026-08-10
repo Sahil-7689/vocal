@@ -1,22 +1,13 @@
 import { gql } from "@apollo/client";
 
-export const CREATE_WORKFLOW_HASURA = gql`
-  mutation CreateWorkflowHasura(
-    $org_id: uuid!
-    $name: String!
-    $description: String
-    $status: String!
-    $steps: [workflow_steps_insert_input!]!
-    $triggers: [workflow_triggers_insert_input!]!
-  ) {
+export const CREATE_WORKFLOW = gql`
+  mutation CreateWorkflow($orgId: uuid!, $name: String!, $description: String) {
     insert_workflows_one(
       object: {
-        org_id: $org_id
+        org_id: $orgId
         name: $name
         description: $description
-        status: $status
-        steps: { data: $steps }
-        triggers: { data: $triggers }
+        status: "draft"
       }
     ) {
       id
@@ -24,9 +15,13 @@ export const CREATE_WORKFLOW_HASURA = gql`
       name
       description
       status
+      created_at
+      updated_at
     }
   }
 `;
+
+export const CREATE_WORKFLOW_HASURA = CREATE_WORKFLOW;
 
 export const UPDATE_WORKFLOW_HASURA = gql`
   mutation UpdateWorkflowHasura($id: uuid!, $name: String, $description: String, $status: String) {
@@ -39,6 +34,7 @@ export const UPDATE_WORKFLOW_HASURA = gql`
       name
       description
       status
+      updated_at
     }
   }
 `;

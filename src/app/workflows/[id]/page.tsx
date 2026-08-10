@@ -14,7 +14,6 @@ import {
 
 import { GET_WORKFLOW } from "@/graphql/queries/workflows";
 import { SAVE_WORKFLOW } from "@/graphql/mutations/workflows";
-import { getMockWorkflow, saveMockWorkflow } from "@/lib/mockBackend";
 import { useOrganization } from "@/context/OrganizationContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useWorkflowStore } from "@/stores/workflowStore";
@@ -71,7 +70,6 @@ export default function WorkflowBuilderPage() {
   const { data, loading, error } = useQuery(GET_WORKFLOW, {
     variables: {
       id: workflowId,
-      userOrgId: currentOrganization.id,
     },
     fetchPolicy: "network-only",
   });
@@ -107,7 +105,7 @@ export default function WorkflowBuilderPage() {
           isRestricted: !t.enabled,
         })),
       }
-    : getMockWorkflow(workflowId, currentOrganization.id);
+    : null;
 
   // Synchronize React Flow nodes & edges from resolved active workflow
   useEffect(() => {
@@ -172,33 +170,18 @@ export default function WorkflowBuilderPage() {
         };
       });
 
-      saveMockWorkflow({
-        id: workflowId,
-        organizationId: currentOrganization.id,
-        name: workflowName,
-        status: "active",
-        steps: stepInputs,
-        triggers,
-      });
-
       await saveWorkflowMutation({
         variables: {
-          input: {
-            id: workflowId,
-            organizationId: currentOrganization.id,
-            name: workflowName,
-            status: "active",
-            steps: stepInputs,
-            triggers,
-          },
+          id: workflowId,
+          name: workflowName,
+          status: "active",
         },
       });
 
       setDirty(false);
       toast.success("Workflow saved successfully!");
     } catch (err: any) {
-      setDirty(false);
-      toast.success("Workflow saved successfully!");
+      toast.error("Failed to save workflow", { description: err.message });
     }
   };
 
