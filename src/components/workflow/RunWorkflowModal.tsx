@@ -2,8 +2,7 @@
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useMutation } from "@apollo/client";
-import { TRIGGER_WORKFLOW_RUN } from "@/graphql/mutations/runs";
+import { getAccessToken } from "@/lib/auth";
 import { useOrganization } from "@/context/OrganizationContext";
 import { Play, AlertCircle, Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -22,31 +21,46 @@ export const RunWorkflowModal: React.FC<RunWorkflowModalProps> = ({
   onClose,
 }) => {
   const router = useRouter();
-  const { currentOrganization, currentUser, currentRole } = useOrganization();
-  const [triggerRun, { loading }] = useMutation(TRIGGER_WORKFLOW_RUN);
+  const { currentOrganization, currentUser } = useOrganization();
+  const [loading, setLoading] = useState(false);
 
   if (!isOpen) return null;
 
   const handleRun = async () => {
+    setLoading(true);
     try {
-      const res = await triggerRun({
-        variables: {
-          workflow_id: workflowId,
-          userOrgId: currentOrganization.id,
-          userName: currentUser.displayName,
+      const token = getAccessToken();
+      const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000").replace(/\/$/, "");
+
+      const res = await fetch(`${apiUrl}/v1/trigger-workflow-run`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(currentUser?.id ? { "x-hasura-user-id": currentUser.id } : {}),
         },
+        body: JSON.stringify({
+          input: {
+            workflow_id: workflowId,
+          },
+        }),
       });
 
-      const runId = res.data?.triggerWorkflowRun?.id;
-      if (runId) {
+      const data = await res.json();
+
+      if (res.ok && data.run_id) {
         toast.success("Workflow run initiated!");
         onClose();
-        router.push(`/workflows/${workflowId}/runs/${runId}`);
+        router.push(`/workflows/${workflowId}/runs/${data.run_id}`);
       } else {
-        toast.error("Unable to start workflow run.");
+        toast.error("Unable to start workflow run", {
+          description: data.message || "Execution engine returned an error.",
+        });
       }
     } catch (err: any) {
       toast.error("Failed to start workflow", { description: err.message });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -80,21 +94,20 @@ export const RunWorkflowModal: React.FC<RunWorkflowModalProps> = ({
           >
             Cancel
           </button>
-
           <button
             disabled={loading}
             onClick={handleRun}
-            className="px-5 py-2 rounded-lg bg-primary text-on-primary font-mono text-xs font-semibold hover:bg-primary-container transition-all flex items-center gap-2 shadow-md disabled:opacity-50"
+            className="px-4 py-2 rounded-lg bg-primary hover:bg-primary-container text-on-primary font-mono text-xs font-semibold flex items-center gap-2 shadow-md transition-all disabled:opacity-50"
           >
             {loading ? (
               <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                Initiating...
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Starting Run...
               </>
             ) : (
               <>
                 <Play className="w-3.5 h-3.5 fill-current" />
-                Run workflow
+                Confirm &amp; Execute
               </>
             )}
           </button>
