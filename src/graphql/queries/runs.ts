@@ -43,6 +43,14 @@ export const GET_RUN = gql`
       workflow {
         id
         name
+        steps(order_by: { position: asc }) {
+          id
+          workflow_id
+          position
+          name
+          type
+          config
+        }
       }
       step_runs(order_by: { created_at: asc }) {
         id

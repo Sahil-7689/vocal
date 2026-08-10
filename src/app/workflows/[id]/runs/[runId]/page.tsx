@@ -13,14 +13,9 @@ import { ShaderBackground } from "@/components/layout/ShaderBackground";
 import { ExecutionTimeline } from "@/components/runs/ExecutionTimeline";
 import { WorkflowRun, StepRun } from "@/types";
 import {
-  Play,
   ChevronLeft,
   Clock,
   CheckCircle2,
-  AlertCircle,
-  XCircle,
-  Loader2,
-  ShieldAlert,
 } from "lucide-react";
 
 export default function LiveRunMonitorPage() {
@@ -31,7 +26,7 @@ export default function LiveRunMonitorPage() {
 
   const { currentOrganization } = useOrganization();
 
-  // Initial Run metadata query
+  // Initial Run metadata & workflow steps query
   const { data: runData, loading: runLoading } = useQuery(GET_RUN, {
     variables: {
       runId,
@@ -45,6 +40,7 @@ export default function LiveRunMonitorPage() {
   });
 
   const rawRun = runData?.workflow_runs_by_pk || runData?.workflow_run_by_pk;
+  const rawWorkflowSteps: any[] = rawRun?.workflow?.steps || [];
   const rawStepRuns: any[] = subData?.step_runs?.length
     ? subData.step_runs
     : rawRun?.step_runs || rawRun?.stepRuns || [];
@@ -64,31 +60,69 @@ export default function LiveRunMonitorPage() {
       }
     : null;
 
-  const stepRuns: StepRun[] = rawStepRuns.map((sr: any) => ({
-    id: sr.id,
-    workflowRunId: sr.workflow_run_id || sr.workflowRunId,
-    workflowStepId: sr.workflow_step_id || sr.workflowStepId,
-    stepName: sr.workflow_step?.name || sr.stepName || "Step",
-    stepType: sr.workflow_step?.type || sr.stepType || "llm_call",
-    status: sr.status,
-    input: sr.input,
-    output: sr.output,
-    error: sr.error,
-    attemptCount: sr.attempt_count || sr.attemptCount || 1,
-    approvedBy: sr.approved_by || sr.approvedBy,
-    approvedAt: sr.approved_at || sr.approvedAt,
-    startedAt: sr.started_at || sr.startedAt,
-    completedAt: sr.completed_at || sr.completedAt,
-    createdAt: sr.created_at || sr.createdAt,
-    updatedAt: sr.completed_at || sr.started_at || sr.created_at || new Date().toISOString(),
-  }));
+  // Left Join: Start from ALL configured workflow_steps ordered by position ASC,
+  // then merge existing step_runs matching workflow_step_id.
+  // Unexecuted steps receive status "pending".
+  const mergedSteps: StepRun[] = rawWorkflowSteps.map((ws: any) => {
+    const matchingRun = rawStepRuns.find(
+      (sr: any) => (sr.workflow_step_id || sr.workflowStepId) === ws.id
+    );
 
-  const isCompleted = stepRuns.length > 0 && stepRuns.every((s) => s.status === "completed");
-  const isPaused = stepRuns.some((s) => s.status === "paused");
-  const isFailed = stepRuns.some((s) => s.status === "failed");
+    if (matchingRun) {
+      return {
+        id: matchingRun.id,
+        workflowRunId: matchingRun.workflow_run_id || matchingRun.workflowRunId || runId,
+        workflowStepId: ws.id,
+        stepName: ws.name || matchingRun.workflow_step?.name || "Step",
+        stepType: ws.type || matchingRun.workflow_step?.type || "llm_call",
+        status: matchingRun.status,
+        input: matchingRun.input,
+        output: matchingRun.output,
+        error: matchingRun.error,
+        attemptCount: matchingRun.attempt_count || matchingRun.attemptCount || 1,
+        approvedBy: matchingRun.approved_by || matchingRun.approvedBy,
+        approvedAt: matchingRun.approved_at || matchingRun.approvedAt,
+        startedAt: matchingRun.started_at || matchingRun.startedAt,
+        completedAt: matchingRun.completed_at || matchingRun.completedAt,
+        createdAt: matchingRun.created_at || matchingRun.createdAt,
+        updatedAt: matchingRun.completed_at || matchingRun.started_at || matchingRun.created_at || new Date().toISOString(),
+      };
+    }
+
+    return {
+      id: `pending-${ws.id}`,
+      workflowRunId: runId,
+      workflowStepId: ws.id,
+      stepName: ws.name || "Workflow Step",
+      stepType: ws.type || "llm_call",
+      status: "pending",
+      input: ws.config || undefined,
+      output: undefined,
+      error: undefined,
+      attemptCount: 0,
+      startedAt: undefined,
+      completedAt: undefined,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+  });
+
+  // Calculate progress using real merged steps
+  const completedCount = mergedSteps.filter((s) => s.status === "completed").length;
+  const totalCount = rawWorkflowSteps.length || mergedSteps.length;
+
+  const isCompleted = rawRun?.status === "completed" || (totalCount > 0 && completedCount === totalCount);
+  const isPaused = rawRun?.status === "paused" || mergedSteps.some((s) => s.status === "paused");
+  const isFailed = rawRun?.status === "failed" || mergedSteps.some((s) => s.status === "failed");
   const isRunning = !isCompleted && !isPaused && !isFailed;
 
-  const currentStatus = isCompleted ? "completed" : isPaused ? "paused" : isFailed ? "failed" : "running";
+  const currentStatusText = isCompleted
+    ? "Completed"
+    : isPaused
+    ? "PAUSED — Awaiting approval"
+    : isFailed
+    ? "Failed"
+    : "Running";
 
   return (
     <div className="min-h-screen flex bg-background text-on-surface relative">
@@ -126,12 +160,12 @@ export default function LiveRunMonitorPage() {
                         : "bg-primary/10 text-primary animate-pulse"
                     }`}
                   >
-                    {currentStatus}
+                    {currentStatusText}
                   </span>
                 </div>
                 <p className="font-mono text-xs text-on-surface-variant mt-0.5">
                   Run ID: <span className="text-on-surface font-semibold">{runId}</span> • Triggered by{" "}
-                  <strong className="text-primary">{run?.triggeredBy || "Sahil Kumar"}</strong>
+                  <strong className="text-primary">{run?.triggeredBy || "System User"}</strong>
                 </p>
               </div>
             </div>
@@ -158,7 +192,7 @@ export default function LiveRunMonitorPage() {
               <div>
                 <div className="text-[10px] text-on-surface-variant uppercase">Total Steps</div>
                 <div className="font-bold text-on-surface mt-0.5">
-                  {stepRuns.length} steps configured
+                  {totalCount} steps configured
                 </div>
               </div>
 
@@ -175,7 +209,7 @@ export default function LiveRunMonitorPage() {
             {isCompleted && (
               <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 text-xs font-mono font-semibold flex items-center gap-2 animate-fade-up">
                 <CheckCircle2 className="w-4 h-4" />
-                ✓ Workflow completed successfully. All steps executed in sequence.
+                ✓ Workflow completed successfully. All {totalCount} steps executed in sequence.
               </div>
             )}
           </div>
@@ -186,17 +220,17 @@ export default function LiveRunMonitorPage() {
               <h3 className="font-display font-bold text-base text-on-surface">
                 Execution Timeline
               </h3>
-              <span className="font-mono text-[10px] text-on-surface-variant uppercase">
-                {stepRuns.filter((s) => s.status === "completed").length} / {stepRuns.length} Steps Completed
+              <span className="font-mono text-[11px] font-bold text-primary uppercase">
+                {completedCount} / {totalCount} STEPS COMPLETED
               </span>
             </div>
 
-            {runLoading && stepRuns.length === 0 ? (
+            {runLoading && mergedSteps.length === 0 ? (
               <div className="p-12 text-center font-mono text-xs text-on-surface-variant animate-pulse">
                 Initializing execution stream...
               </div>
             ) : (
-              <ExecutionTimeline stepRuns={stepRuns} />
+              <ExecutionTimeline stepRuns={mergedSteps} />
             )}
           </div>
         </main>
