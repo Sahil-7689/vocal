@@ -503,7 +503,7 @@ async function applyPermissions() {
     }, `workflow_triggers:${role} DELETE`);
   }
 
-  // workflow_runs SELECT
+  // workflow_runs SELECT, INSERT, UPDATE
   const wrFilter = { workflow: orgMemberFilter };
   const wrCols = ["id", "workflow_id", "org_id", "status", "trigger_type", "triggered_by", "started_at", "completed_at", "created_at", "input", "output", "error"];
   for (const role of ["user", "owner", "editor", "viewer"]) {
@@ -517,8 +517,34 @@ async function applyPermissions() {
       },
     }, `workflow_runs:${role} SELECT`);
   }
+  for (const role of ["user", "owner", "editor"]) {
+    await apply({
+      type: "pg_create_insert_permission",
+      args: {
+        source: "default",
+        table: { schema: "public", name: "workflow_runs" },
+        role,
+        permission: {
+          columns: ["workflow_id", "org_id", "status", "trigger_type", "triggered_by", "input", "output", "started_at", "completed_at", "error"],
+          check: wrFilter,
+        },
+      },
+    }, `workflow_runs:${role} INSERT`);
+    await apply({
+      type: "pg_create_update_permission",
+      args: {
+        source: "default",
+        table: { schema: "public", name: "workflow_runs" },
+        role,
+        permission: {
+          columns: ["status", "output", "completed_at", "error"],
+          filter: wrFilter,
+        },
+      },
+    }, `workflow_runs:${role} UPDATE`);
+  }
 
-  // step_runs SELECT
+  // step_runs SELECT, INSERT, UPDATE
   const srFilter = { workflow_run: { workflow: orgMemberFilter } };
   const srCols = ["id", "workflow_run_id", "workflow_step_id", "status", "started_at", "completed_at", "input", "output", "error", "attempt_count", "approved_by", "approved_at", "created_at"];
   for (const role of ["user", "owner", "editor", "viewer"]) {
@@ -531,6 +557,32 @@ async function applyPermissions() {
         permission: { columns: srCols, filter: srFilter },
       },
     }, `step_runs:${role} SELECT`);
+  }
+  for (const role of ["user", "owner", "editor"]) {
+    await apply({
+      type: "pg_create_insert_permission",
+      args: {
+        source: "default",
+        table: { schema: "public", name: "step_runs" },
+        role,
+        permission: {
+          columns: ["workflow_run_id", "workflow_step_id", "status", "input", "output", "error", "attempt_count", "approved_by", "approved_at", "started_at", "completed_at"],
+          check: srFilter,
+        },
+      },
+    }, `step_runs:${role} INSERT`);
+    await apply({
+      type: "pg_create_update_permission",
+      args: {
+        source: "default",
+        table: { schema: "public", name: "step_runs" },
+        role,
+        permission: {
+          columns: ["status", "output", "error", "attempt_count", "approved_by", "approved_at", "completed_at"],
+          filter: srFilter,
+        },
+      },
+    }, `step_runs:${role} UPDATE`);
   }
 }
 
