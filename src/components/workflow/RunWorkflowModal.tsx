@@ -114,18 +114,40 @@ export const RunWorkflowModal: React.FC<RunWorkflowModalProps> = ({
         return;
       }
 
-      // Order steps by position ASC and map step_runs with real PostgreSQL workflow_steps.id
+      // Order steps strictly by position ASC
       const sortedSteps = [...validSteps].sort((a: any, b: any) => (a.position || 0) - (b.position || 0));
 
-      const stepRunsData = sortedSteps.map((s: any) => ({
-        workflow_step_id: s.id, // Real database-generated workflow_steps.id UUID
-        status: s.type === "approval_gate" ? "paused" : "completed",
-        input: s.config || { text: "Workflow run initiated." },
-        output: { status: "success", step: s.name || "Workflow Step" },
-        attempt_count: 1,
-      }));
+      // Execute steps in ascending position order.
+      // STOP immediately if an approval_gate step is encountered!
+      const stepRunsData: any[] = [];
+      let isPaused = false;
 
-      const runStatus = stepRunsData.some((sr: any) => sr.status === "paused") ? "paused" : "completed";
+      for (const s of sortedSteps) {
+        if (s.type === "approval_gate") {
+          stepRunsData.push({
+            workflow_step_id: s.id, // Real database-generated workflow_steps.id UUID
+            status: "paused",
+            input: s.config || { text: "Workflow approval required." },
+            output: { status: "paused", step: s.name || "Approval Gate" },
+            attempt_count: 1,
+            approved_by: null,
+            approved_at: null,
+          });
+          isPaused = true;
+          // STOP EXECUTION IMMEDIATELY! Do not execute or create subsequent steps!
+          break;
+        } else {
+          stepRunsData.push({
+            workflow_step_id: s.id, // Real database-generated workflow_steps.id UUID
+            status: "completed",
+            input: s.config || { text: "Workflow step executed." },
+            output: { status: "success", step: s.name || "Workflow Step" },
+            attempt_count: 1,
+          });
+        }
+      }
+
+      const runStatus = isPaused ? "paused" : "completed";
 
       const res = await triggerRunWithStepsMutation({
         variables: {
@@ -138,7 +160,7 @@ export const RunWorkflowModal: React.FC<RunWorkflowModalProps> = ({
 
       const newRunId = res?.data?.insert_workflow_runs_one?.id;
       if (newRunId) {
-        toast.success("Workflow run initiated!");
+        toast.success(isPaused ? "Workflow paused at approval gate!" : "Workflow run completed!");
         onClose();
         router.push(`/workflows/${workflowId}/runs/${newRunId}`);
       } else {
