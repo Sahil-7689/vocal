@@ -72,8 +72,8 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       defaultConfig.systemPrompt = "You are a helpful AI assistant.";
       defaultConfig.temperature = 0.7;
     } else if (type === "http_request") {
-      defaultConfig.method = "POST";
-      defaultConfig.url = "https://api.example.com/v1/webhook";
+      defaultConfig.method = "GET";
+      defaultConfig.url = "https://httpbin.org/get";
     } else if (type === "db_write") {
       defaultConfig.table = "users";
     } else if (type === "notify") {

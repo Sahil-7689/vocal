@@ -246,7 +246,7 @@ export const StepConfigPanel: React.FC = () => {
               </label>
               <input
                 {...register("url")}
-                placeholder="https://api.example.com/v1/tickets"
+                placeholder="https://httpbin.org/get"
                 className="w-full h-8 px-2.5 rounded-md bg-surface-container-lowest border border-outline-variant/60 text-xs font-mono focus:border-primary outline-none"
               />
             </div>

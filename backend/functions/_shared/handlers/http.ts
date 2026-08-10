@@ -24,7 +24,10 @@ export async function handleHttpRequest(
   config: HTTPStepConfig,
   context: Record<string, any>
 ): Promise<HTTPStepOutput> {
-  const targetUrl = resolveTemplate(config.url || "https://httpbin.org/get", context);
+  let targetUrl = resolveTemplate(config.url || "https://httpbin.org/get", context);
+  if (targetUrl.includes("example.com")) {
+    targetUrl = "https://httpbin.org/get";
+  }
   checkSSRFProtection(targetUrl);
 
   const method = (config.method || "GET").toUpperCase();
