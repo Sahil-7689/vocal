@@ -303,14 +303,13 @@ export function getMockWorkflows(orgId: string) {
 }
 
 export function getMockWorkflow(id: string, userOrgId?: string) {
-  let wf = workflows.find((w) => w.id === id && (w.organizationId === userOrgId || !userOrgId));
-  if (!wf) {
-    wf = workflows.find((w) => w.id === id);
-    if (wf && userOrgId) {
-      wf.organizationId = userOrgId;
-    }
+  const wf = workflows.find((w) => w.id === id);
+  if (!wf) return null;
+  // Strictly enforce Organization Isolation
+  if (userOrgId && wf.organizationId !== userOrgId) {
+    return null;
   }
-  return wf || null;
+  return wf;
 }
 
 export function saveMockWorkflow(wfData: Partial<Workflow> & { id?: string; organizationId: string }) {
@@ -321,6 +320,7 @@ export function saveMockWorkflow(wfData: Partial<Workflow> & { id?: string; orga
     workflows[existingIndex] = {
       ...workflows[existingIndex],
       ...wfData,
+      organizationId: wfData.organizationId || workflows[existingIndex].organizationId,
       updatedAt: now,
     };
     return workflows[existingIndex];
@@ -363,14 +363,13 @@ export function getMockRuns(orgId: string) {
 }
 
 export function getMockRun(runId: string, userOrgId?: string) {
-  let run = workflowRuns.find((r) => r.id === runId && (r.organizationId === userOrgId || !userOrgId));
-  if (!run) {
-    run = workflowRuns.find((r) => r.id === runId);
-    if (run && userOrgId) {
-      run.organizationId = userOrgId;
-    }
+  const run = workflowRuns.find((r) => r.id === runId);
+  if (!run) return null;
+  // Strictly enforce Organization Isolation
+  if (userOrgId && run.organizationId !== userOrgId) {
+    return null;
   }
-  return run || null;
+  return run;
 }
 
 // Live Run Simulator
