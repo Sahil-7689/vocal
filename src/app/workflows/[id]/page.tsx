@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useQuery, useMutation } from "@apollo/client";
 import {
@@ -77,35 +77,37 @@ export default function WorkflowBuilderPage() {
   const [saveWorkflowMutation, { loading: saving }] = useMutation(SAVE_WORKFLOW);
 
   const rawWf = data?.workflows_by_pk || data?.workflow_by_pk;
-  const activeWorkflow: Workflow | null = rawWf
-    ? {
-        id: rawWf.id,
-        organizationId: rawWf.org_id || rawWf.organizationId,
-        name: rawWf.name,
-        description: rawWf.description,
-        status: rawWf.status,
-        createdAt: rawWf.created_at || rawWf.createdAt,
-        updatedAt: rawWf.updated_at || rawWf.updatedAt,
-        createdBy: rawWf.created_by || rawWf.createdBy,
-        steps: (rawWf.steps || []).map((s: any) => ({
-          id: s.id,
-          workflowId: s.workflow_id || s.workflowId,
-          type: s.type,
-          name: s.name,
-          positionX: s.position_x || s.positionX || 300,
-          positionY: s.position_y || s.positionY || 150,
-          config: s.config,
-          nextStepId: s.next_step_id || s.nextStepId,
-        })),
-        triggers: (rawWf.triggers || []).map((t: any) => ({
-          id: t.id,
-          workflowId: t.workflow_id || t.workflowId,
-          type: t.type,
-          config: t.config,
-          isRestricted: !t.enabled,
-        })),
-      }
-    : null;
+  
+  const activeWorkflow: Workflow | null = useMemo(() => {
+    if (!rawWf) return null;
+    return {
+      id: rawWf.id,
+      organizationId: rawWf.org_id || rawWf.organizationId,
+      name: rawWf.name,
+      description: rawWf.description,
+      status: rawWf.status,
+      createdAt: rawWf.created_at || rawWf.createdAt,
+      updatedAt: rawWf.updated_at || rawWf.updatedAt,
+      createdBy: rawWf.created_by || rawWf.createdBy,
+      steps: (rawWf.steps || []).map((s: any) => ({
+        id: s.id,
+        workflowId: s.workflow_id || s.workflowId,
+        type: s.type,
+        name: s.name,
+        positionX: s.position_x || s.positionX || 300,
+        positionY: s.position_y || s.positionY || 150,
+        config: s.config,
+        nextStepId: s.next_step_id || s.nextStepId,
+      })),
+      triggers: (rawWf.triggers || []).map((t: any) => ({
+        id: t.id,
+        workflowId: t.workflow_id || t.workflowId,
+        type: t.type,
+        config: t.config,
+        isRestricted: !t.enabled,
+      })),
+    };
+  }, [rawWf]);
 
   // Synchronize React Flow nodes & edges from resolved active workflow
   useEffect(() => {
@@ -147,7 +149,7 @@ export default function WorkflowBuilderPage() {
       setEdges(initialEdges);
       setDirty(false);
     }
-  }, [activeWorkflow, setNodes, setEdges, setDirty]);
+  }, [activeWorkflow?.id, setNodes, setEdges, setDirty]);
 
   const handleSave = async () => {
     if (!canEditWorkflow()) {
@@ -185,9 +187,43 @@ export default function WorkflowBuilderPage() {
     }
   };
 
-  // Cross-Organization Guard Handling (Requirement 24)
-  // If loading is false and no workflow matches the user's organization, block access.
-  const isUnauthorized = !loading && !activeWorkflow;
+  // Cross-Organization Guard Handling
+  // Only show "unavailable" AFTER loading is done AND there is no data AND no query error.
+  // If there IS a GraphQL error, show the real error message for debugging.
+  const isUnauthorized = !loading && !error && !activeWorkflow;
+
+  // Show actual GraphQL error detail instead of hiding it
+  if (error) {
+    return (
+      <div className="min-h-screen flex bg-background text-on-surface relative">
+        <Sidebar />
+        <div className="flex-1 ml-60 flex flex-col min-h-screen relative z-10">
+          <Header title="Workflow Builder" />
+          <div className="flex-1 flex items-center justify-center p-8">
+            <div className="bg-surface-container-lowest border border-error/30 rounded-2xl p-8 max-w-lg w-full text-center space-y-4 shadow-xl animate-fade-up">
+              <div className="w-12 h-12 rounded-full bg-error-container/30 text-error flex items-center justify-center mx-auto">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <h2 className="font-display font-bold text-xl text-on-surface">
+                Failed to load workflow
+              </h2>
+              <p className="text-xs text-on-surface-variant font-mono break-all">
+                {error.graphQLErrors?.[0]?.message || error.networkError?.message || error.message}
+              </p>
+              <div className="pt-2">
+                <button
+                  onClick={() => router.push("/workflows")}
+                  className="px-4 py-2 rounded-lg bg-primary text-on-primary font-mono text-xs font-semibold hover:bg-primary-container transition-all"
+                >
+                  Return to Workflows
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (isUnauthorized) {
     return (
@@ -204,7 +240,7 @@ export default function WorkflowBuilderPage() {
                 Workflow unavailable
               </h2>
               <p className="text-xs text-on-surface-variant">
-                You don&apos;t have permission to access this workflow.
+                Workflow ID <span className="font-mono text-primary">{workflowId}</span> was not found or you don&apos;t have access. It may belong to a different organization.
               </p>
               <div className="pt-2">
                 <button
