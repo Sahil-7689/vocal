@@ -189,7 +189,7 @@ export default function WorkflowBuilderPage() {
         config: (node.data.config || {}) as any,
       }));
 
-      await saveWorkflowMutation({
+      const res = await saveWorkflowMutation({
         variables: {
           id: workflowId,
           name: workflowName,
@@ -197,6 +197,40 @@ export default function WorkflowBuilderPage() {
           steps: stepPayload,
         },
       });
+
+      const savedSteps: any[] = res?.data?.insert_workflow_steps?.returning || [];
+      if (savedSteps.length > 0) {
+        const updatedNodes: Node[] = nodes.map((node, idx) => {
+          const matchingStep = savedSteps.find((s) => s.position === idx + 1);
+          const realDbId = matchingStep?.id || node.id;
+          return {
+            ...node,
+            id: realDbId,
+            data: {
+              ...node.data,
+              id: realDbId,
+            },
+          };
+        });
+
+        // Generate connecting edges using real database step IDs
+        const updatedEdges: Edge[] = [];
+        updatedNodes.forEach((node, idx) => {
+          const nextNode = updatedNodes[idx + 1];
+          if (nextNode) {
+            updatedEdges.push({
+              id: `e-${node.id}-${nextNode.id}`,
+              source: node.id,
+              target: nextNode.id,
+              animated: true,
+              style: { stroke: "#6366f1", strokeWidth: 2 },
+            });
+          }
+        });
+
+        setNodes(updatedNodes);
+        setEdges(updatedEdges);
+      }
 
       setDirty(false);
       toast.success("Workflow saved successfully!");

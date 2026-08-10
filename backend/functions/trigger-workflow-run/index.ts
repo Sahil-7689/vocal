@@ -156,6 +156,11 @@ export default async function handleTriggerWorkflowRun(req: Request, res: Respon
 
     // Sequential Step Execution Engine
     for (const step of steps) {
+      // Server-side Validation: Verify step belongs to target workflow
+      if (step.workflow_id && step.workflow_id !== workflow_id) {
+        return res.status(400).json({ message: "Bad Request: Step does not belong to target workflow." });
+      }
+
       // Create step_runs record
       const stepRunRes = await graphqlAdmin<{
         insert_step_runs_one: { id: string };
