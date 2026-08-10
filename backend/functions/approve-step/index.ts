@@ -1,11 +1,6 @@
 import { Request, Response } from "express";
-import { Pool } from "pg";
+import { graphqlAdmin } from "../_shared/graphqlAdmin";
 import { executeStep, WorkflowStep } from "../_shared/executor";
-import { incrementOrgQuota } from "../_shared/workflowEngine";
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || "postgres://postgres:postgres@localhost:5432/vocalflow",
-});
 
 export default async function handleApproveStep(req: Request, res: Response) {
   // Enforce CORS Headers for all client origins
@@ -14,91 +9,101 @@ export default async function handleApproveStep(req: Request, res: Response) {
   res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   if (req.method === "OPTIONS") return res.sendStatus(200);
 
-  // ---------------------------------------------------------------
-  // Layer 1: Extract authenticated user identity
-  // Must come from X-Hasura-User-Id header set by Hasura from JWT.
-  // Never trust user_id, org_id, or role from the request body.
-  // ---------------------------------------------------------------
-  const userId = (
-    req.headers["x-hasura-user-id"] ||
-    req.body?.session_variables?.["x-hasura-user-id"]
-  ) as string;
-
-  if (!userId || userId === "anonymous") {
-    return res.status(401).json({ message: "Unauthorized: Missing authenticated user identity." });
-  }
-
-  const { step_run_id } = req.body?.input || {};
-  if (!step_run_id) {
-    return res.status(400).json({ message: "Bad Request: step_run_id is required." });
-  }
-
-  const client = await pool.connect();
-
   try {
     // ---------------------------------------------------------------
-    // Layer 1 Authorization: Verify org membership via JOIN
+    // Layer 1: Extract authenticated user identity
     // ---------------------------------------------------------------
-    const queryRes = await client.query(
-      `SELECT
-          sr.id            AS step_run_id,
-          sr.status        AS step_run_status,
-          wr.id            AS run_id,
-          wr.status        AS run_status,
-          ws.position      AS step_position,
-          ws.type          AS step_type,
-          ws.config        AS step_config,
-          w.id             AS workflow_id,
-          w.org_id,
-          m.role           AS user_role
-       FROM public.step_runs sr
-       JOIN public.workflow_runs wr  ON wr.id  = sr.workflow_run_id
-       JOIN public.workflow_steps ws ON ws.id  = sr.workflow_step_id
-       JOIN public.workflows w       ON w.id   = wr.workflow_id
-       JOIN public.org_members m     ON m.org_id = w.org_id AND m.user_id = $2
-       WHERE sr.id = $1`,
-      [step_run_id, userId]
+    const userId = (
+      req.headers["x-hasura-user-id"] ||
+      req.body?.session_variables?.["x-hasura-user-id"]
+    ) as string;
+
+    if (!userId || userId === "anonymous") {
+      return res.status(401).json({ message: "Unauthorized: Missing authenticated user identity." });
+    }
+
+    const { step_run_id } = req.body?.input || req.body || {};
+    if (!step_run_id) {
+      return res.status(400).json({ message: "Bad Request: step_run_id is required." });
+    }
+
+    // ---------------------------------------------------------------
+    // Layer 1 Authorization: Verify org membership & step run state
+    // ---------------------------------------------------------------
+    const stepRunRes = await graphqlAdmin<{
+      step_runs_by_pk: {
+        id: string;
+        status: string;
+        workflow_run: {
+          id: string;
+          status: string;
+          workflow_id: string;
+          org_id: string;
+          workflow: {
+            organization: {
+              members: Array<{ user_id: string; role: string }>;
+            };
+          };
+        };
+        workflow_step: {
+          position: number;
+          type: string;
+          config: any;
+        };
+      } | null;
+    }>(
+      `query GetStepRunDetails($stepRunId: uuid!, $userId: uuid!) {
+        step_runs_by_pk(id: $stepRunId) {
+          id
+          status
+          workflow_run {
+            id
+            status
+            workflow_id
+            org_id
+            workflow {
+              organization {
+                members(where: { user_id: { _eq: $userId } }) {
+                  role
+                }
+              }
+            }
+          }
+          workflow_step {
+            position
+            type
+            config
+          }
+        }
+      }`,
+      { stepRunId: step_run_id, userId }
     );
 
-    if (queryRes.rows.length === 0) {
-      return res.status(403).json({
-        message: "Forbidden: Step run not found or access denied.",
-      });
+    const sr = stepRunRes?.step_runs_by_pk;
+    if (!sr || !sr.workflow_run || !sr.workflow_run.workflow?.organization?.members?.length) {
+      return res.status(403).json({ message: "Forbidden: Step run not found or access denied." });
     }
 
-    const {
-      run_id:           runId,
-      step_run_status:  stepRunStatus,
-      step_position:    stepPosition,
-      step_type:        stepType,
-      step_config:      stepConfig,
-      workflow_id:      workflowId,
-      org_id:           orgId,
-      user_role:        userRole,
-    } = queryRes.rows[0];
+    const userRole = sr.workflow_run.workflow.organization.members[0].role;
+    const stepPosition = sr.workflow_step.position;
+    const stepType = sr.workflow_step.type;
+    const stepConfig = sr.workflow_step.config || {};
+    const runId = sr.workflow_run.id;
+    const workflowId = sr.workflow_run.workflow_id;
+    const orgId = sr.workflow_run.org_id;
 
-    // State Validation
     if (stepType !== "approval_gate") {
-      return res.status(400).json({
-        message: `Bad Request: Step is not an approval_gate (type: ${stepType}).`,
-      });
+      return res.status(400).json({ message: `Bad Request: Step is not an approval_gate (type: ${stepType}).` });
     }
 
-    if (stepRunStatus !== "paused") {
-      return res.status(400).json({
-        message: `Bad Request: Step is not in paused state (current: ${stepRunStatus}).`,
-      });
+    if (sr.status !== "paused") {
+      return res.status(400).json({ message: `Bad Request: Step is not in paused state (current: ${sr.status}).` });
     }
 
-    // ---------------------------------------------------------------
-    // Layer 2: Runtime Approver Role Check against step config
-    // ---------------------------------------------------------------
     const requiredRole: string = stepConfig?.required_role || "owner";
 
     if (userRole === "viewer") {
-      return res.status(403).json({
-        message: "Forbidden: Viewers cannot approve workflow steps.",
-      });
+      return res.status(403).json({ message: "Forbidden: Viewers cannot approve workflow steps." });
     }
 
     if (requiredRole === "owner" && userRole !== "owner") {
@@ -107,85 +112,97 @@ export default async function handleApproveStep(req: Request, res: Response) {
       });
     }
 
-    // ---------------------------------------------------------------
-    // Mark approval_gate step_run as completed with approval audit fields
-    // ---------------------------------------------------------------
-    await client.query(
-      `UPDATE public.step_runs
-       SET status       = 'completed',
-           approved_by  = $1,
-           approved_at  = now(),
-           completed_at = now()
-       WHERE id = $2`,
-      [userId, step_run_id]
+    // Mark step_run completed & workflow_run running
+    await graphqlAdmin(
+      `mutation ApproveStepGate($stepRunId: uuid!, $runId: uuid!, $userId: uuid!) {
+        update_step_runs_by_pk(pk_columns: { id: $stepRunId }, _set: { status: "completed", approved_by: $userId, completed_at: "now()" }) { id }
+        update_workflow_runs_by_pk(pk_columns: { id: $runId }, _set: { status: "running" }) { id }
+      }`,
+      { stepRunId: step_run_id, runId, userId }
     );
 
-    await client.query(
-      `UPDATE public.workflow_runs SET status = 'running' WHERE id = $1`,
-      [runId]
+    // Resume execution of remaining steps
+    const remainingRes = await graphqlAdmin<{
+      workflow_steps: WorkflowStep[];
+    }>(
+      `query GetRemainingSteps($workflowId: uuid!, $position: Int!) {
+        workflow_steps(where: { workflow_id: { _eq: $workflowId }, position: { _gt: $position } }, order_by: { position: asc }) {
+          id
+          workflow_id
+          position
+          name
+          type
+          config
+        }
+      }`,
+      { workflowId, position: stepPosition }
     );
 
-    // ---------------------------------------------------------------
-    // Resume execution of remaining steps AFTER approval gate (position > stepPosition)
-    // ---------------------------------------------------------------
-    const remainingStepsRes = await client.query(
-      `SELECT id, workflow_id, position, name, type, config
-       FROM public.workflow_steps
-       WHERE workflow_id = $1 AND position > $2
-       ORDER BY position ASC`,
-      [workflowId, stepPosition]
-    );
-
-    const remainingSteps: WorkflowStep[] = remainingStepsRes.rows;
+    const remainingSteps = remainingRes.workflow_steps || [];
     let prevOutput: any = { status: "approved", approvedBy: userId };
     let pausedAgain = false;
     let executionFailed = false;
 
     for (const step of remainingSteps) {
-      const stepRunRes = await client.query(
-        `INSERT INTO public.step_runs
-           (workflow_run_id, workflow_step_id, status, input, attempt_count, started_at)
-         VALUES ($1, $2, 'running', $3, 1, now())
-         RETURNING id`,
-        [runId, step.id, JSON.stringify(prevOutput)]
+      const stepRunRes = await graphqlAdmin<{
+        insert_step_runs_one: { id: string };
+      }>(
+        `mutation CreateStepRun($runId: uuid!, $stepId: uuid!) {
+          insert_step_runs_one(object: {
+            workflow_run_id: $runId
+            workflow_step_id: $stepId
+            status: "running"
+            attempt_count: 1
+          }) {
+            id
+          }
+        }`,
+        { runId, stepId: step.id }
       );
-      const newStepRunId = stepRunRes.rows[0].id;
+      const newStepRunId = stepRunRes.insert_step_runs_one.id;
 
       const context = { previousOutput: prevOutput, stepConfig: step.config };
-      const stepResult = await executeStep(step, context, client, orgId, runId);
+      const stepResult = await executeStep(step, context, undefined, orgId, runId);
 
       if (stepResult.status === "paused") {
-        await client.query(`UPDATE public.step_runs SET status = 'paused' WHERE id = $1`, [newStepRunId]);
-        await client.query(`UPDATE public.workflow_runs SET status = 'paused' WHERE id = $1`, [runId]);
+        await graphqlAdmin(
+          `mutation PauseStepRun($stepRunId: uuid!, $runId: uuid!) {
+            update_step_runs_by_pk(pk_columns: { id: $stepRunId }, _set: { status: "paused" }) { id }
+            update_workflow_runs_by_pk(pk_columns: { id: $runId }, _set: { status: "paused" }) { id }
+          }`,
+          { stepRunId: newStepRunId, runId }
+        );
         pausedAgain = true;
         break;
       } else if (stepResult.status === "failed") {
-        await client.query(
-          `UPDATE public.step_runs SET status = 'failed', error = $1, attempt_count = $2, completed_at = now() WHERE id = $3`,
-          [stepResult.error, stepResult.attempts, newStepRunId]
-        );
-        await client.query(
-          `UPDATE public.workflow_runs SET status = 'failed', error = $1, completed_at = now() WHERE id = $2`,
-          [stepResult.error, runId]
+        await graphqlAdmin(
+          `mutation FailStepRun($stepRunId: uuid!, $runId: uuid!, $error: String!) {
+            update_step_runs_by_pk(pk_columns: { id: $stepRunId }, _set: { status: "failed", error: $error, completed_at: "now()" }) { id }
+            update_workflow_runs_by_pk(pk_columns: { id: $runId }, _set: { status: "failed", error: $error, completed_at: "now()" }) { id }
+          }`,
+          { stepRunId: newStepRunId, runId, error: stepResult.error || "Step failed" }
         );
         executionFailed = true;
         break;
       } else {
-        await client.query(
-          `UPDATE public.step_runs SET status = 'completed', output = $1, attempt_count = $2, completed_at = now() WHERE id = $3`,
-          [JSON.stringify(stepResult.output), stepResult.attempts, newStepRunId]
+        await graphqlAdmin(
+          `mutation CompleteStepRun($stepRunId: uuid!, $output: jsonb) {
+            update_step_runs_by_pk(pk_columns: { id: $stepRunId }, _set: { status: "completed", output: $output, completed_at: "now()" }) { id }
+          }`,
+          { stepRunId: newStepRunId, output: stepResult.output }
         );
         prevOutput = stepResult.output;
       }
     }
 
-    // Mark workflow completed if finished without pausing or failing
     if (!pausedAgain && !executionFailed) {
-      await client.query(
-        `UPDATE public.workflow_runs SET status = 'completed', output = $1, completed_at = now() WHERE id = $2`,
-        [JSON.stringify(prevOutput), runId]
+      await graphqlAdmin(
+        `mutation CompleteWorkflowRun($runId: uuid!, $output: jsonb, $orgId: uuid!) {
+          update_workflow_runs_by_pk(pk_columns: { id: $runId }, _set: { status: "completed", output: $output, completed_at: "now()" }) { id }
+          update_organizations_by_pk(pk_columns: { id: $orgId }, _inc: { quota_used: 1 }) { id }
+        }`,
+        { runId, output: prevOutput, orgId }
       );
-      await incrementOrgQuota(client, orgId);
     }
 
     return res.json({
@@ -193,9 +210,7 @@ export default async function handleApproveStep(req: Request, res: Response) {
       status: pausedAgain ? "paused" : executionFailed ? "failed" : "completed",
     });
   } catch (err: any) {
-    console.error("[approveStep] Error:", err);
+    console.error("[approveStep] Error:", err.message || err);
     return res.status(500).json({ message: err.message || "Internal server error." });
-  } finally {
-    client.release();
   }
 }

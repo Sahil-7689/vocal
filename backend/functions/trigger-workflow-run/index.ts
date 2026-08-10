@@ -1,11 +1,6 @@
 import { Request, Response } from "express";
-import { Pool } from "pg";
+import { graphqlAdmin } from "../_shared/graphqlAdmin";
 import { executeStep, WorkflowStep } from "../_shared/executor";
-import { reserveOrgQuota } from "../_shared/workflowEngine";
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || "postgres://postgres:postgres@localhost:5432/vocalflow",
-});
 
 export default async function handleTriggerWorkflowRun(req: Request, res: Response) {
   // Enforce CORS Headers for all client origins
@@ -14,133 +9,166 @@ export default async function handleTriggerWorkflowRun(req: Request, res: Respon
   res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   if (req.method === "OPTIONS") return res.sendStatus(200);
 
-  // ---------------------------------------------------------------
-  // Layer 1: Extract authenticated user identity from Hasura header.
-  // Injected by Hasura from Nhost JWT — cannot be forged by client.
-  // ---------------------------------------------------------------
-  const userId = (
-    req.headers["x-hasura-user-id"] ||
-    req.body?.session_variables?.["x-hasura-user-id"]
-  ) as string;
-
-  if (!userId || userId === "anonymous") {
-    return res.status(401).json({ message: "Unauthorized: Missing authenticated user identity." });
-  }
-
-  const { workflow_id, input } = req.body?.input || {};
-  if (!workflow_id) {
-    return res.status(400).json({ message: "Bad Request: workflow_id is required." });
-  }
-
-  const client = await pool.connect();
-
   try {
-    await client.query("BEGIN");
-
     // ---------------------------------------------------------------
-    // Layer 1 Authorization: Verify Org Membership & Role
+    // Layer 1: Extract authenticated user identity
     // ---------------------------------------------------------------
-    const wfRes = await client.query(
-      `SELECT w.id, w.org_id, w.name, m.role AS user_role
-       FROM public.workflows w
-       JOIN public.org_members m ON m.org_id = w.org_id AND m.user_id = $2
-       WHERE w.id = $1`,
-      [workflow_id, userId]
-    );
+    const userId = (
+      req.headers["x-hasura-user-id"] ||
+      req.body?.session_variables?.["x-hasura-user-id"]
+    ) as string;
 
-    if (wfRes.rows.length === 0) {
-      await client.query("ROLLBACK");
-      return res.status(403).json({
-        message: "Forbidden: Workflow not found or access denied.",
-      });
+    if (!userId || userId === "anonymous") {
+      return res.status(401).json({ message: "Unauthorized: Missing authenticated user identity." });
     }
 
-    const { org_id: orgId, name: wfName, user_role: userRole } = wfRes.rows[0];
+    const { workflow_id, input } = req.body?.input || req.body || {};
+    if (!workflow_id) {
+      return res.status(400).json({ message: "Bad Request: workflow_id is required." });
+    }
 
-    // Viewer role is denied workflow execution
+    // ---------------------------------------------------------------
+    // Layer 1 Authorization: Verify Org Membership & Role via Hasura Admin
+    // ---------------------------------------------------------------
+    const accessRes = await graphqlAdmin<{
+      workflows_by_pk: {
+        id: string;
+        org_id: string;
+        name: string;
+        organization: {
+          quota_allowed: number;
+          quota_used: number;
+          members: Array<{ user_id: string; role: string }>;
+        };
+      } | null;
+    }>(
+      `query VerifyWorkflowAccess($workflowId: uuid!, $userId: uuid!) {
+        workflows_by_pk(id: $workflowId) {
+          id
+          org_id
+          name
+          organization {
+            quota_allowed
+            quota_used
+            members(where: { user_id: { _eq: $userId } }) {
+              role
+            }
+          }
+        }
+      }`,
+      { workflowId: workflow_id, userId }
+    );
+
+    const wf = accessRes?.workflows_by_pk;
+    if (!wf || !wf.organization || !wf.organization.members || wf.organization.members.length === 0) {
+      return res.status(403).json({ message: "Forbidden: Workflow not found or access denied." });
+    }
+
+    const userRole = wf.organization.members[0].role;
     if (userRole === "viewer") {
-      await client.query("ROLLBACK");
-      return res.status(403).json({
-        message: "Forbidden: Viewers do not have permission to trigger workflow runs.",
-      });
+      return res.status(403).json({ message: "Forbidden: Viewers do not have permission to trigger workflow runs." });
     }
 
-    // Atomic Quota Check (Row locking FOR UPDATE)
-    await reserveOrgQuota(client, orgId);
+    // Quota Check
+    if (wf.organization.quota_used >= wf.organization.quota_allowed) {
+      return res.status(403).json({ message: "Quota exhausted: Organization monthly limit reached." });
+    }
 
-    // Create workflow_runs record
-    const runRes = await client.query(
-      `INSERT INTO public.workflow_runs (workflow_id, org_id, trigger_type, status, input, triggered_by, started_at)
-       VALUES ($1, $2, 'manual', 'running', $3, $4, now())
-       RETURNING id, status, started_at`,
-      [workflow_id, orgId, JSON.stringify(input || {}), userId]
+    // Create workflow_runs record in Hasura
+    const runRes = await graphqlAdmin<{
+      insert_workflow_runs_one: { id: string; status: string; started_at: string };
+    }>(
+      `mutation CreateWorkflowRun($workflowId: uuid!, $orgId: uuid!, $userId: String!) {
+        insert_workflow_runs_one(object: {
+          workflow_id: $workflowId
+          org_id: $orgId
+          status: "running"
+          triggered_by: $userId
+        }) {
+          id
+          status
+          started_at
+        }
+      }`,
+      { workflowId: workflow_id, orgId: wf.org_id, userId }
     );
 
-    const runId = runRes.rows[0].id;
-    await client.query("COMMIT");
+    const runId = runRes.insert_workflow_runs_one.id;
 
     // Load steps ordered by position ASC
-    const stepsRes = await pool.query(
-      `SELECT id, workflow_id, position, name, type, config
-       FROM public.workflow_steps
-       WHERE workflow_id = $1
-       ORDER BY position ASC`,
-      [workflow_id]
+    const stepsRes = await graphqlAdmin<{
+      workflow_steps: WorkflowStep[];
+    }>(
+      `query GetWorkflowSteps($workflowId: uuid!) {
+        workflow_steps(where: { workflow_id: { _eq: $workflowId } }, order_by: { position: asc }) {
+          id
+          workflow_id
+          position
+          name
+          type
+          config
+        }
+      }`,
+      { workflowId: workflow_id }
     );
 
-    const steps: WorkflowStep[] = stepsRes.rows;
+    const steps = stepsRes.workflow_steps || [];
     let prevOutput: any = input || { text: "Workflow triggered.", triggeredBy: userId };
     let isPaused = false;
     let executionFailed = false;
+    let failureError = "";
 
     // Sequential Step Execution Engine
     for (const step of steps) {
-      const stepRunRes = await pool.query(
-        `INSERT INTO public.step_runs
-           (workflow_run_id, workflow_step_id, status, input, attempt_count, started_at)
-         VALUES ($1, $2, 'running', $3, 1, now())
-         RETURNING id`,
-        [runId, step.id, JSON.stringify(prevOutput)]
+      // Create step_runs record
+      const stepRunRes = await graphqlAdmin<{
+        insert_step_runs_one: { id: string };
+      }>(
+        `mutation CreateStepRun($runId: uuid!, $stepId: uuid!) {
+          insert_step_runs_one(object: {
+            workflow_run_id: $runId
+            workflow_step_id: $stepId
+            status: "running"
+            attempt_count: 1
+          }) {
+            id
+          }
+        }`,
+        { runId, stepId: step.id }
       );
-      const stepRunId = stepRunRes.rows[0].id;
+      const stepRunId = stepRunRes.insert_step_runs_one.id;
 
-      // Dispatch step execution to modular handlers (with retry logic)
+      // Execute step
       const context = { input, previousOutput: prevOutput, stepConfig: step.config };
-      const stepResult = await executeStep(step, context, client, orgId, runId);
+      const stepResult = await executeStep(step, context, undefined, wf.org_id, runId);
 
       if (stepResult.status === "paused") {
-        await pool.query(
-          `UPDATE public.step_runs SET status = 'paused' WHERE id = $1`,
-          [stepRunId]
-        );
-        await pool.query(
-          `UPDATE public.workflow_runs SET status = 'paused' WHERE id = $1`,
-          [runId]
+        await graphqlAdmin(
+          `mutation PauseStepRun($stepRunId: uuid!, $runId: uuid!) {
+            update_step_runs_by_pk(pk_columns: { id: $stepRunId }, _set: { status: "paused" }) { id }
+            update_workflow_runs_by_pk(pk_columns: { id: $runId }, _set: { status: "paused" }) { id }
+          }`,
+          { stepRunId, runId }
         );
         isPaused = true;
-        break; // Pause execution loop
+        break;
       } else if (stepResult.status === "failed") {
-        await pool.query(
-          `UPDATE public.step_runs
-           SET status = 'failed', error = $1, attempt_count = $2, completed_at = now()
-           WHERE id = $3`,
-          [stepResult.error, stepResult.attempts, stepRunId]
-        );
-        await pool.query(
-          `UPDATE public.workflow_runs
-           SET status = 'failed', error = $1, completed_at = now()
-           WHERE id = $2`,
-          [stepResult.error, runId]
+        failureError = stepResult.error || "Step failed";
+        await graphqlAdmin(
+          `mutation FailStepRun($stepRunId: uuid!, $runId: uuid!, $error: String!) {
+            update_step_runs_by_pk(pk_columns: { id: $stepRunId }, _set: { status: "failed", error: $error, completed_at: "now()" }) { id }
+            update_workflow_runs_by_pk(pk_columns: { id: $runId }, _set: { status: "failed", error: $error, completed_at: "now()" }) { id }
+          }`,
+          { stepRunId, runId, error: failureError }
         );
         executionFailed = true;
-        break; // Halt execution loop on failure
+        break;
       } else {
-        // Step completed successfully
-        await pool.query(
-          `UPDATE public.step_runs
-           SET status = 'completed', output = $1, attempt_count = $2, completed_at = now()
-           WHERE id = $3`,
-          [JSON.stringify(stepResult.output), stepResult.attempts, stepRunId]
+        await graphqlAdmin(
+          `mutation CompleteStepRun($stepRunId: uuid!, $output: jsonb) {
+            update_step_runs_by_pk(pk_columns: { id: $stepRunId }, _set: { status: "completed", output: $output, completed_at: "now()" }) { id }
+          }`,
+          { stepRunId, output: stepResult.output }
         );
         prevOutput = stepResult.output;
       }
@@ -148,11 +176,12 @@ export default async function handleTriggerWorkflowRun(req: Request, res: Respon
 
     // Complete workflow run if finished without pausing or failing
     if (!isPaused && !executionFailed) {
-      await pool.query(
-        `UPDATE public.workflow_runs
-         SET status = 'completed', output = $1, completed_at = now()
-         WHERE id = $2`,
-        [JSON.stringify(prevOutput), runId]
+      await graphqlAdmin(
+        `mutation CompleteWorkflowRun($runId: uuid!, $output: jsonb, $orgId: uuid!) {
+          update_workflow_runs_by_pk(pk_columns: { id: $runId }, _set: { status: "completed", output: $output, completed_at: "now()" }) { id }
+          update_organizations_by_pk(pk_columns: { id: $orgId }, _inc: { quota_used: 1 }) { id }
+        }`,
+        { runId, output: prevOutput, orgId: wf.org_id }
       );
     }
 
@@ -161,10 +190,7 @@ export default async function handleTriggerWorkflowRun(req: Request, res: Respon
       status: isPaused ? "paused" : executionFailed ? "failed" : "completed",
     });
   } catch (err: any) {
-    await client.query("ROLLBACK").catch(() => {});
-    console.error("[triggerWorkflowRun] Error:", err);
+    console.error("[triggerWorkflowRun] Error:", err.message || err);
     return res.status(500).json({ message: err.message || "Internal server error." });
-  } finally {
-    client.release();
   }
 }

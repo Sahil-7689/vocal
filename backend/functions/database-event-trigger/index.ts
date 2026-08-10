@@ -1,182 +1,175 @@
 import { Request, Response } from "express";
-import { Pool } from "pg";
+import { graphqlAdmin } from "../_shared/graphqlAdmin";
 import { executeStep, WorkflowStep } from "../_shared/executor";
-import { reserveOrgQuota } from "../_shared/workflowEngine";
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || "postgres://postgres:postgres@localhost:5432/vocalflow",
-});
 
 export default async function handleDatabaseEventTrigger(req: Request, res: Response) {
-  // Extract event payload (supports Hasura Event Trigger structure & direct API trigger)
-  const eventData = req.body?.event?.data?.new || req.body?.data || req.body;
-  const eventTable = req.body?.table?.name || req.body?.table || "workflow_events";
-  const eventOp = req.body?.event?.op || req.body?.operation || "INSERT";
+  const { event_type, payload, org_id } = req.body || {};
 
-  const eventOrgId = eventData?.org_id;
-  const eventType = eventData?.event_type || "INSERT";
-  const depth = Number(req.body?.event_depth || 0);
-
-  // 1. Recursion / Infinite Loop Safeguard
-  if (eventTable === "workflow_results" || eventTable === "workflow_runs" || eventTable === "step_runs") {
-    console.warn(`[DatabaseEventTrigger] Blocked potential recursive loop on system table '${eventTable}'.`);
-    return res.status(200).json({ message: "Ignored system table event to prevent recursion." });
+  if (!event_type || !payload) {
+    return res.status(400).json({ message: "Bad Request: event_type and payload are required." });
   }
-
-  if (depth > 3) {
-    console.warn(`[DatabaseEventTrigger] Event depth threshold exceeded (${depth}). Halting event propagation.`);
-    return res.status(200).json({ message: "Event depth threshold exceeded. Loop prevented." });
-  }
-
-  if (!eventOrgId) {
-    return res.status(400).json({ message: "Bad Request: Missing org_id on database event record." });
-  }
-
-  const client = await pool.connect();
 
   try {
-    await client.query("BEGIN");
-
-    // 2. Query matching workflows for this organization
-    // Cross-Org Security: ONLY select workflows belonging to the exact SAME org_id as the event!
-    const wfRes = await client.query(
-      `SELECT w.id, w.org_id, w.name, w.status AS wf_status,
-              t.id AS trigger_id, t.config AS trigger_config, t.enabled AS trigger_enabled
-       FROM public.workflows w
-       JOIN public.workflow_triggers t ON t.workflow_id = w.id
-       WHERE w.org_id = $1 AND w.status = 'active' AND t.type = 'database_event' AND t.enabled = true`,
-      [eventOrgId]
+    const wfRes = await graphqlAdmin<{
+      workflows: Array<{
+        id: string;
+        org_id: string;
+        name: string;
+        status: string;
+        organization: {
+          quota_allowed: number;
+          quota_used: number;
+        };
+        triggers: Array<{ id: string; config: any; enabled: boolean }>;
+      }>;
+    }>(
+      `query GetDBEventWorkflows($orgId: uuid!) {
+        workflows(where: { org_id: { _eq: $orgId }, status: { _eq: "active" } }) {
+          id
+          org_id
+          name
+          status
+          organization {
+            quota_allowed
+            quota_used
+          }
+          triggers(where: { type: { _eq: "database_event" }, enabled: { _eq: true } }) {
+            id
+            config
+            enabled
+          }
+        }
+      }`,
+      { orgId: org_id }
     );
 
-    if (wfRes.rows.length === 0) {
-      await client.query("ROLLBACK");
-      return res.status(200).json({ message: "No matching database event triggers found for this organization." });
-    }
+    const workflows = wfRes.workflows || [];
+    const triggeredRuns: string[] = [];
 
-    const executedRuns: string[] = [];
+    for (const wf of workflows) {
+      const trigger = wf.triggers?.[0];
+      if (!trigger) continue;
 
-    for (const row of wfRes.rows) {
-      const { id: wfId, org_id: orgId, trigger_config: triggerConfig } = row;
+      const targetEventType = trigger.config?.event_type;
+      if (targetEventType && targetEventType !== event_type) continue;
 
-      // Filter by table/operation/event_type configuration if specified
-      if (triggerConfig?.table && triggerConfig.table !== eventTable) continue;
-      if (triggerConfig?.operation && triggerConfig.operation !== eventOp) continue;
-      if (triggerConfig?.event_type && triggerConfig.event_type !== eventType) continue;
+      if (wf.organization.quota_used >= wf.organization.quota_allowed) continue;
 
-      // Server-side Atomic Quota Check & Reservation
-      try {
-        await reserveOrgQuota(client, orgId);
-      } catch (quotaErr: any) {
-        console.warn(`[DatabaseEventTrigger] Quota exceeded for org ${orgId}. Skipping event trigger.`);
-        continue;
-      }
-
-      // Construct Event Input Context
-      const eventInput = {
-        trigger: "database_event",
-        event: {
-          operation: eventOp,
-          table: eventTable,
-          event_type: eventType,
-          data: eventData?.payload || eventData,
-        },
-      };
-
-      const runRes = await client.query(
-        `INSERT INTO public.workflow_runs (workflow_id, org_id, trigger_type, status, input, triggered_by, started_at)
-         VALUES ($1, $2, 'database_event', 'running', $3, 'Database Event Trigger', now())
-         RETURNING id`,
-        [wfId, orgId, JSON.stringify(eventInput)]
+      const runRes = await graphqlAdmin<{
+        insert_workflow_runs_one: { id: string };
+      }>(
+        `mutation CreateDBEventRun($workflowId: uuid!, $orgId: uuid!, $input: jsonb) {
+          insert_workflow_runs_one(object: {
+            workflow_id: $workflowId
+            org_id: $orgId
+            status: "running"
+            triggered_by: "Database Event"
+            input: $input
+          }) {
+            id
+          }
+        }`,
+        {
+          workflowId: wf.id,
+          orgId: wf.org_id,
+          input: { eventType: event_type, payload },
+        }
       );
 
-      const runId = runRes.rows[0].id;
-      executedRuns.push(runId);
+      const runId = runRes.insert_workflow_runs_one.id;
+      triggeredRuns.push(runId);
 
-      // Async step execution
-      executeDbEventRunAsync(wfId, orgId, runId, eventInput, depth + 1);
-    }
-
-    await client.query("COMMIT");
-
-    return res.status(200).json({
-      success: true,
-      executed_runs_count: executedRuns.length,
-      run_ids: executedRuns,
-      message: "Database event trigger processing completed successfully.",
-    });
-  } catch (err: any) {
-    await client.query("ROLLBACK").catch(() => {});
-    console.error("[handleDatabaseEventTrigger] Error:", err);
-    return res.status(500).json({ message: err.message || "Internal server error." });
-  } finally {
-    client.release();
-  }
-}
-
-async function executeDbEventRunAsync(workflowId: string, orgId: string, runId: string, input: any, depth: number) {
-  try {
-    const stepsRes = await pool.query(
-      `SELECT id, workflow_id, position, name, type, config
-       FROM public.workflow_steps
-       WHERE workflow_id = $1
-       ORDER BY position ASC`,
-      [workflowId]
-    );
-
-    const steps: WorkflowStep[] = stepsRes.rows;
-    let prevOutput: any = input;
-    let isPaused = false;
-    let executionFailed = false;
-
-    for (const step of steps) {
-      const stepRunRes = await pool.query(
-        `INSERT INTO public.step_runs (workflow_run_id, workflow_step_id, status, input, attempt_count, started_at)
-         VALUES ($1, $2, 'running', $3, 1, now())
-         RETURNING id`,
-        [runId, step.id, JSON.stringify(prevOutput)]
+      const stepsRes = await graphqlAdmin<{
+        workflow_steps: WorkflowStep[];
+      }>(
+        `query GetDBEventSteps($workflowId: uuid!) {
+          workflow_steps(where: { workflow_id: { _eq: $workflowId } }, order_by: { position: asc }) {
+            id
+            workflow_id
+            position
+            name
+            type
+            config
+          }
+        }`,
+        { workflowId: wf.id }
       );
-      const stepRunId = stepRunRes.rows[0].id;
 
-      const dbClient = await pool.connect();
-      try {
-        const context = { input, previousOutput: prevOutput, stepConfig: step.config, eventDepth: depth };
-        const stepResult = await executeStep(step, context, dbClient, orgId, runId);
+      const steps = stepsRes.workflow_steps || [];
+      let prevOutput: any = { eventType: event_type, payload };
+      let isPaused = false;
+      let executionFailed = false;
+
+      for (const step of steps) {
+        const stepRunRes = await graphqlAdmin<{
+          insert_step_runs_one: { id: string };
+        }>(
+          `mutation CreateDBEventStepRun($runId: uuid!, $stepId: uuid!) {
+            insert_step_runs_one(object: {
+              workflow_run_id: $runId
+              workflow_step_id: $stepId
+              status: "running"
+              attempt_count: 1
+            }) {
+              id
+            }
+          }`,
+          { runId, stepId: step.id }
+        );
+        const stepRunId = stepRunRes.insert_step_runs_one.id;
+
+        const context = { input: payload, previousOutput: prevOutput, stepConfig: step.config };
+        const stepResult = await executeStep(step, context, undefined, wf.org_id, runId);
 
         if (stepResult.status === "paused") {
-          await pool.query(`UPDATE public.step_runs SET status = 'paused' WHERE id = $1`, [stepRunId]);
-          await pool.query(`UPDATE public.workflow_runs SET status = 'paused' WHERE id = $1`, [runId]);
+          await graphqlAdmin(
+            `mutation PauseDBEventStepRun($stepRunId: uuid!, $runId: uuid!) {
+              update_step_runs_by_pk(pk_columns: { id: $stepRunId }, _set: { status: "paused" }) { id }
+              update_workflow_runs_by_pk(pk_columns: { id: $runId }, _set: { status: "paused" }) { id }
+            }`,
+            { stepRunId, runId }
+          );
           isPaused = true;
           break;
         } else if (stepResult.status === "failed") {
-          await pool.query(
-            `UPDATE public.step_runs SET status = 'failed', error = $1, attempt_count = $2, completed_at = now() WHERE id = $3`,
-            [stepResult.error, stepResult.attempts, stepRunId]
-          );
-          await pool.query(
-            `UPDATE public.workflow_runs SET status = 'failed', error = $1, completed_at = now() WHERE id = $2`,
-            [stepResult.error, runId]
+          await graphqlAdmin(
+            `mutation FailDBEventStepRun($stepRunId: uuid!, $runId: uuid!, $error: String!) {
+              update_step_runs_by_pk(pk_columns: { id: $stepRunId }, _set: { status: "failed", error: $error, completed_at: "now()" }) { id }
+              update_workflow_runs_by_pk(pk_columns: { id: $runId }, _set: { status: "failed", error: $error, completed_at: "now()" }) { id }
+            }`,
+            { stepRunId, runId, error: stepResult.error || "Step failed" }
           );
           executionFailed = true;
           break;
         } else {
-          await pool.query(
-            `UPDATE public.step_runs SET status = 'completed', output = $1, attempt_count = $2, completed_at = now() WHERE id = $3`,
-            [JSON.stringify(stepResult.output), stepResult.attempts, stepRunId]
+          await graphqlAdmin(
+            `mutation CompleteDBEventStepRun($stepRunId: uuid!, $output: jsonb) {
+              update_step_runs_by_pk(pk_columns: { id: $stepRunId }, _set: { status: "completed", output: $output, completed_at: "now()" }) { id }
+            }`,
+            { stepRunId, output: stepResult.output }
           );
           prevOutput = stepResult.output;
         }
-      } finally {
-        dbClient.release();
+      }
+
+      if (!isPaused && !executionFailed) {
+        await graphqlAdmin(
+          `mutation CompleteDBEventWorkflowRun($runId: uuid!, $output: jsonb, $orgId: uuid!) {
+            update_workflow_runs_by_pk(pk_columns: { id: $runId }, _set: { status: "completed", output: $output, completed_at: "now()" }) { id }
+            update_organizations_by_pk(pk_columns: { id: $orgId }, _inc: { quota_used: 1 }) { id }
+          }`,
+          { runId, output: prevOutput, orgId: wf.org_id }
+        );
       }
     }
 
-    if (!isPaused && !executionFailed) {
-      await pool.query(
-        `UPDATE public.workflow_runs SET status = 'completed', output = $1, completed_at = now() WHERE id = $2`,
-        [JSON.stringify(prevOutput), runId]
-      );
-    }
+    return res.json({
+      success: true,
+      triggered_runs: triggeredRuns,
+      count: triggeredRuns.length,
+    });
   } catch (err: any) {
-    console.error("[executeDbEventRunAsync] Error:", err);
+    console.error("[databaseEventTrigger] Error:", err.message || err);
+    return res.status(500).json({ message: err.message || "Internal server error." });
   }
 }

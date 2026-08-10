@@ -1,18 +1,12 @@
 import { Request, Response } from "express";
-import { Pool } from "pg";
+import { graphqlAdmin } from "../_shared/graphqlAdmin";
 import { executeStep, WorkflowStep } from "../_shared/executor";
-import { reserveOrgQuota } from "../_shared/workflowEngine";
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || "postgres://postgres:postgres@localhost:5432/vocalflow",
-});
 
 // Cache for idempotency keys to prevent duplicate scheduled runs on retries
 const processedScheduleKeys = new Set<string>();
 
 /**
  * Validates a standard 5-part cron expression (e.g. "0 9 * * *")
- * Rejects invalid syntax and arbitrary JavaScript / shell code injections.
  */
 export function validateCronExpression(cron: string): boolean {
   if (!cron || typeof cron !== "string") return false;
@@ -23,179 +17,180 @@ export function validateCronExpression(cron: string): boolean {
 export default async function handleScheduledTrigger(req: Request, res: Response) {
   const { workflow_id, scheduled_time, cron_override } = req.body || {};
 
-  const client = await pool.connect();
-
   try {
-    await client.query("BEGIN");
+    const wfRes = await graphqlAdmin<{
+      workflows: Array<{
+        id: string;
+        org_id: string;
+        name: string;
+        status: string;
+        organization: {
+          quota_allowed: number;
+          quota_used: number;
+        };
+        triggers: Array<{ id: string; config: any; enabled: boolean }>;
+      }>;
+    }>(
+      `query GetScheduledWorkflows($where: workflows_bool_exp!) {
+        workflows(where: $where) {
+          id
+          org_id
+          name
+          status
+          organization {
+            quota_allowed
+            quota_used
+          }
+          triggers(where: { type: { _eq: "scheduled" } }) {
+            id
+            config
+            enabled
+          }
+        }
+      }`,
+      {
+        where: workflow_id
+          ? { id: { _eq: workflow_id } }
+          : { status: { _eq: "active" } },
+      }
+    );
 
-    // 1. Query workflow and scheduled trigger
-    const queryStr = workflow_id
-      ? `SELECT w.id, w.org_id, w.name, w.status AS wf_status,
-                t.id AS trigger_id, t.config AS trigger_config, t.enabled AS trigger_enabled
-         FROM public.workflows w
-         JOIN public.workflow_triggers t ON t.workflow_id = w.id
-         WHERE w.id = $1 AND t.type = 'scheduled'`
-      : `SELECT w.id, w.org_id, w.name, w.status AS wf_status,
-                t.id AS trigger_id, t.config AS trigger_config, t.enabled AS trigger_enabled
-         FROM public.workflows w
-         JOIN public.workflow_triggers t ON t.workflow_id = w.id
-         WHERE w.status = 'active' AND t.type = 'scheduled' AND t.enabled = true`;
-
-    const params = workflow_id ? [workflow_id] : [];
-    const wfRes = await client.query(queryStr, params);
-
-    if (wfRes.rows.length === 0) {
-      await client.query("ROLLBACK");
+    const workflows = wfRes.workflows || [];
+    if (workflows.length === 0) {
       return res.status(404).json({ message: "No active scheduled workflows found." });
     }
 
     const executedRuns: string[] = [];
 
-    for (const row of wfRes.rows) {
-      const {
-        id: wfId,
-        org_id: orgId,
-        wf_status: wfStatus,
-        trigger_id: triggerId,
-        trigger_config: triggerConfig,
-        trigger_enabled: triggerEnabled,
-      } = row;
+    for (const wf of workflows) {
+      const trigger = wf.triggers?.[0];
+      if (!trigger || wf.status !== "active" || trigger.enabled === false) continue;
 
-      if (wfStatus !== "active" || triggerEnabled === false) {
-        continue; // Skip disabled
-      }
+      const cronExpr = cron_override || trigger.config?.cron;
+      if (cronExpr && !validateCronExpression(cronExpr)) continue;
 
-      // Cron validation
-      const cronExpr = cron_override || triggerConfig?.cron || "0 9 * * *";
-      if (!validateCronExpression(cronExpr)) {
-        console.warn(`[ScheduledTrigger] Invalid cron expression '${cronExpr}' for workflow ${wfId}. Skipping.`);
-        continue;
-      }
-
-      // Idempotency / Duplicate Schedule Protection
-      const executionTimestamp = scheduled_time || new Date().toISOString().slice(0, 16); // Minute resolution
-      const idempotencyKey = `${wfId}:${triggerId}:${executionTimestamp}`;
-
-      if (processedScheduleKeys.has(idempotencyKey)) {
-        console.log(`[ScheduledTrigger] Duplicate schedule execution blocked by idempotency key (${idempotencyKey}).`);
-        continue;
-      }
-
-      // Server-side Atomic Quota Check & Reservation
-      try {
-        await reserveOrgQuota(client, orgId);
-      } catch (quotaErr: any) {
-        console.warn(`[ScheduledTrigger] Quota exceeded for org ${orgId}. Skipping workflow ${wfId}.`);
-        continue;
-      }
-
-      // Mark idempotency key as processed
+      const timeKey = scheduled_time || new Date().toISOString().slice(0, 16);
+      const idempotencyKey = `sched-${wf.id}-${trigger.id}-${timeKey}`;
+      if (processedScheduleKeys.has(idempotencyKey)) continue;
       processedScheduleKeys.add(idempotencyKey);
 
-      // Create workflow_runs record
-      const scheduledInput = {
-        trigger: "scheduled",
-        cron: cronExpr,
-        timezone: triggerConfig?.timezone || "Asia/Kolkata",
-        triggered_at: executionTimestamp,
-        ...(triggerConfig?.input || {}),
-      };
+      if (wf.organization.quota_used >= wf.organization.quota_allowed) continue;
 
-      const runRes = await client.query(
-        `INSERT INTO public.workflow_runs (workflow_id, org_id, trigger_type, status, input, triggered_by, started_at)
-         VALUES ($1, $2, 'scheduled', 'running', $3, 'Scheduled Trigger', now())
-         RETURNING id`,
-        [wfId, orgId, JSON.stringify(scheduledInput)]
+      const runRes = await graphqlAdmin<{
+        insert_workflow_runs_one: { id: string };
+      }>(
+        `mutation CreateScheduledRun($workflowId: uuid!, $orgId: uuid!, $input: jsonb) {
+          insert_workflow_runs_one(object: {
+            workflow_id: $workflowId
+            org_id: $orgId
+            status: "running"
+            triggered_by: "Scheduled Trigger"
+            input: $input
+          }) {
+            id
+          }
+        }`,
+        {
+          workflowId: wf.id,
+          orgId: wf.org_id,
+          input: { scheduledTime: timeKey, cron: cronExpr },
+        }
       );
 
-      const runId = runRes.rows[0].id;
+      const runId = runRes.insert_workflow_runs_one.id;
       executedRuns.push(runId);
 
-      // Async step execution via core execution engine
-      executeScheduledRunAsync(wfId, orgId, runId, scheduledInput);
-    }
-
-    await client.query("COMMIT");
-
-    return res.status(200).json({
-      success: true,
-      executed_runs_count: executedRuns.length,
-      run_ids: executedRuns,
-      message: "Scheduled trigger processing completed successfully.",
-    });
-  } catch (err: any) {
-    await client.query("ROLLBACK").catch(() => {});
-    console.error("[handleScheduledTrigger] Error:", err);
-    return res.status(500).json({ message: err.message || "Internal server error." });
-  } finally {
-    client.release();
-  }
-}
-
-async function executeScheduledRunAsync(workflowId: string, orgId: string, runId: string, input: any) {
-  try {
-    const stepsRes = await pool.query(
-      `SELECT id, workflow_id, position, name, type, config
-       FROM public.workflow_steps
-       WHERE workflow_id = $1
-       ORDER BY position ASC`,
-      [workflowId]
-    );
-
-    const steps: WorkflowStep[] = stepsRes.rows;
-    let prevOutput: any = input;
-    let isPaused = false;
-    let executionFailed = false;
-
-    for (const step of steps) {
-      const stepRunRes = await pool.query(
-        `INSERT INTO public.step_runs (workflow_run_id, workflow_step_id, status, input, attempt_count, started_at)
-         VALUES ($1, $2, 'running', $3, 1, now())
-         RETURNING id`,
-        [runId, step.id, JSON.stringify(prevOutput)]
+      const stepsRes = await graphqlAdmin<{
+        workflow_steps: WorkflowStep[];
+      }>(
+        `query GetScheduledSteps($workflowId: uuid!) {
+          workflow_steps(where: { workflow_id: { _eq: $workflowId } }, order_by: { position: asc }) {
+            id
+            workflow_id
+            position
+            name
+            type
+            config
+          }
+        }`,
+        { workflowId: wf.id }
       );
-      const stepRunId = stepRunRes.rows[0].id;
 
-      const dbClient = await pool.connect();
-      try {
-        const context = { input, previousOutput: prevOutput, stepConfig: step.config };
-        const stepResult = await executeStep(step, context, dbClient, orgId, runId);
+      const steps = stepsRes.workflow_steps || [];
+      let prevOutput: any = { scheduledTime: timeKey, cron: cronExpr };
+      let isPaused = false;
+      let executionFailed = false;
+
+      for (const step of steps) {
+        const stepRunRes = await graphqlAdmin<{
+          insert_step_runs_one: { id: string };
+        }>(
+          `mutation CreateScheduledStepRun($runId: uuid!, $stepId: uuid!) {
+            insert_step_runs_one(object: {
+              workflow_run_id: $runId
+              workflow_step_id: $stepId
+              status: "running"
+              attempt_count: 1
+            }) {
+              id
+            }
+          }`,
+          { runId, stepId: step.id }
+        );
+        const stepRunId = stepRunRes.insert_step_runs_one.id;
+
+        const context = { input: prevOutput, previousOutput: prevOutput, stepConfig: step.config };
+        const stepResult = await executeStep(step, context, undefined, wf.org_id, runId);
 
         if (stepResult.status === "paused") {
-          await pool.query(`UPDATE public.step_runs SET status = 'paused' WHERE id = $1`, [stepRunId]);
-          await pool.query(`UPDATE public.workflow_runs SET status = 'paused' WHERE id = $1`, [runId]);
+          await graphqlAdmin(
+            `mutation PauseScheduledStepRun($stepRunId: uuid!, $runId: uuid!) {
+              update_step_runs_by_pk(pk_columns: { id: $stepRunId }, _set: { status: "paused" }) { id }
+              update_workflow_runs_by_pk(pk_columns: { id: $runId }, _set: { status: "paused" }) { id }
+            }`,
+            { stepRunId, runId }
+          );
           isPaused = true;
           break;
         } else if (stepResult.status === "failed") {
-          await pool.query(
-            `UPDATE public.step_runs SET status = 'failed', error = $1, attempt_count = $2, completed_at = now() WHERE id = $3`,
-            [stepResult.error, stepResult.attempts, stepRunId]
-          );
-          await pool.query(
-            `UPDATE public.workflow_runs SET status = 'failed', error = $1, completed_at = now() WHERE id = $2`,
-            [stepResult.error, runId]
+          await graphqlAdmin(
+            `mutation FailScheduledStepRun($stepRunId: uuid!, $runId: uuid!, $error: String!) {
+              update_step_runs_by_pk(pk_columns: { id: $stepRunId }, _set: { status: "failed", error: $error, completed_at: "now()" }) { id }
+              update_workflow_runs_by_pk(pk_columns: { id: $runId }, _set: { status: "failed", error: $error, completed_at: "now()" }) { id }
+            }`,
+            { stepRunId, runId, error: stepResult.error || "Step failed" }
           );
           executionFailed = true;
           break;
         } else {
-          await pool.query(
-            `UPDATE public.step_runs SET status = 'completed', output = $1, attempt_count = $2, completed_at = now() WHERE id = $3`,
-            [JSON.stringify(stepResult.output), stepResult.attempts, stepRunId]
+          await graphqlAdmin(
+            `mutation CompleteScheduledStepRun($stepRunId: uuid!, $output: jsonb) {
+              update_step_runs_by_pk(pk_columns: { id: $stepRunId }, _set: { status: "completed", output: $output, completed_at: "now()" }) { id }
+            }`,
+            { stepRunId, output: stepResult.output }
           );
           prevOutput = stepResult.output;
         }
-      } finally {
-        dbClient.release();
+      }
+
+      if (!isPaused && !executionFailed) {
+        await graphqlAdmin(
+          `mutation CompleteScheduledWorkflowRun($runId: uuid!, $output: jsonb, $orgId: uuid!) {
+            update_workflow_runs_by_pk(pk_columns: { id: $runId }, _set: { status: "completed", output: $output, completed_at: "now()" }) { id }
+            update_organizations_by_pk(pk_columns: { id: $orgId }, _inc: { quota_used: 1 }) { id }
+          }`,
+          { runId, output: prevOutput, orgId: wf.org_id }
+        );
       }
     }
 
-    if (!isPaused && !executionFailed) {
-      await pool.query(
-        `UPDATE public.workflow_runs SET status = 'completed', output = $1, completed_at = now() WHERE id = $2`,
-        [JSON.stringify(prevOutput), runId]
-      );
-    }
+    return res.json({
+      success: true,
+      executed_runs: executedRuns,
+      count: executedRuns.length,
+    });
   } catch (err: any) {
-    console.error("[executeScheduledRunAsync] Error:", err);
+    console.error("[scheduledTrigger] Error:", err.message || err);
+    return res.status(500).json({ message: err.message || "Internal server error." });
   }
 }
