@@ -4,6 +4,8 @@ import React from "react";
 import { StepRun } from "@/types";
 import { XCircle, RefreshCw, AlertTriangle } from "lucide-react";
 
+import { safeFormatTime } from "@/lib/dateUtils";
+
 interface FailedStepCardProps {
   stepRun: StepRun;
 }
@@ -30,7 +32,7 @@ export const FailedStepCard: React.FC<FailedStepCardProps> = ({ stepRun }) => {
 
       <div className="p-2.5 rounded-lg bg-surface-container-lowest border border-outline-variant/40 flex justify-between font-mono text-[11px] text-on-surface-variant">
         <span>Attempt Count: <strong className="text-on-surface">{stepRun.attemptCount}</strong></span>
-        <span>Timestamp: <strong className="text-on-surface">{new Date(stepRun.createdAt).toLocaleTimeString()}</strong></span>
+        <span>Timestamp: <strong className="text-on-surface">{safeFormatTime(stepRun.createdAt)}</strong></span>
       </div>
     </div>
   );

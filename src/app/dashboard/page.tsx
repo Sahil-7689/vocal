@@ -6,6 +6,7 @@ import { useQuery } from "@apollo/client";
 import { GET_WORKFLOWS } from "@/graphql/queries/workflows";
 import { GET_RUNS } from "@/graphql/queries/runs";
 import { useOrganization } from "@/context/OrganizationContext";
+import { safeFormatTime } from "@/lib/dateUtils";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { ShaderBackground } from "@/components/layout/ShaderBackground";
@@ -263,7 +264,7 @@ export default function DashboardPage() {
                       <div className="flex items-center justify-between font-mono text-[10px] text-on-surface-variant">
                         <span className="flex items-center gap-1">
                           <Clock className="w-3 h-3" />
-                          {new Date(run.startedAt).toLocaleTimeString()}
+                          {safeFormatTime(run.startedAt)}
                         </span>
                         <span>By {run.triggeredBy}</span>
                       </div>

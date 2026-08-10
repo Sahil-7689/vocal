@@ -7,6 +7,7 @@ import { GET_WORKFLOWS } from "@/graphql/queries/workflows";
 import { DELETE_WORKFLOW } from "@/graphql/mutations/workflows";
 import { useOrganization } from "@/context/OrganizationContext";
 import { usePermissions } from "@/hooks/usePermissions";
+import { safeFormatDate } from "@/lib/dateUtils";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { ShaderBackground } from "@/components/layout/ShaderBackground";
@@ -173,7 +174,7 @@ export default function WorkflowsPage() {
                           </div>
                         </td>
                         <td className="p-4 font-mono text-on-surface-variant">
-                          {new Date(wf.updatedAt).toLocaleDateString()}
+                          {safeFormatDate(wf.updatedAt)}
                         </td>
                         <td className="p-4 text-right">
                           <div className="flex items-center justify-end gap-2">

@@ -6,6 +6,7 @@ import { useQuery, useSubscription } from "@apollo/client";
 import { GET_RUN } from "@/graphql/queries/runs";
 import { STEP_RUNS_SUBSCRIPTION } from "@/graphql/subscriptions/stepRuns";
 import { useOrganization } from "@/context/OrganizationContext";
+import { safeFormatTime } from "@/lib/dateUtils";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { ShaderBackground } from "@/components/layout/ShaderBackground";
@@ -150,7 +151,7 @@ export default function LiveRunMonitorPage() {
                 <div className="text-[10px] text-on-surface-variant uppercase">Start Time</div>
                 <div className="font-bold text-on-surface flex items-center gap-1.5 mt-0.5">
                   <Clock className="w-3.5 h-3.5 text-primary" />
-                  {run?.startedAt ? new Date(run.startedAt).toLocaleTimeString() : "Just now"}
+                  {safeFormatTime(run?.startedAt)}
                 </div>
               </div>
 
