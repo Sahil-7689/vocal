@@ -269,6 +269,28 @@ async function applyRelationships() {
       using: { foreign_key_constraint_on: "workflow_run_id" },
     },
   }, "step_runs.workflow_run");
+
+  // step_runs.workflow_step (object)
+  await apply({
+    type: "pg_create_object_relationship",
+    args: {
+      source: "default",
+      table: { schema: "public", name: "step_runs" },
+      name: "workflow_step",
+      using: { foreign_key_constraint_on: "workflow_step_id" },
+    },
+  }, "step_runs.workflow_step");
+
+  // workflow_steps.step_runs (array)
+  await apply({
+    type: "pg_create_array_relationship",
+    args: {
+      source: "default",
+      table: { schema: "public", name: "workflow_steps" },
+      name: "step_runs",
+      using: { foreign_key_constraint_on: { table: { schema: "public", name: "step_runs" }, column: "workflow_step_id" } },
+    },
+  }, "workflow_steps.step_runs");
 }
 
 // ── Permissions ───────────────────────────────────────────────────────────
@@ -546,6 +568,7 @@ async function applyPermissions() {
 
   // step_runs SELECT, INSERT, UPDATE
   const srFilter = { workflow_run: { workflow: orgMemberFilter } };
+  const srInsertFilter = { workflow_step: { workflow: orgMemberFilter } };
   const srCols = ["id", "workflow_run_id", "workflow_step_id", "status", "started_at", "completed_at", "input", "output", "error", "attempt_count", "approved_by", "approved_at", "created_at"];
   for (const role of ["user", "owner", "editor", "viewer"]) {
     await apply({
@@ -567,7 +590,7 @@ async function applyPermissions() {
         role,
         permission: {
           columns: ["workflow_run_id", "workflow_step_id", "status", "input", "output", "error", "attempt_count", "approved_by", "approved_at", "started_at", "completed_at"],
-          check: srFilter,
+          check: srInsertFilter,
         },
       },
     }, `step_runs:${role} INSERT`);

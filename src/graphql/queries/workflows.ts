@@ -41,7 +41,7 @@ export const GET_WORKFLOW = gql`
       created_at
       updated_at
       created_by
-      steps {
+      steps(order_by: { position: asc }) {
         id
         workflow_id
         position
