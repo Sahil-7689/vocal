@@ -77,8 +77,8 @@ export async function executeStep(
       }
 
       case "db_write": {
-        if (!dbClient || !orgId || !runId) {
-          throw new Error("db_write step requires database client and execution context.");
+        if (!orgId || !runId) {
+          throw new Error("db_write step requires organization ID and workflow run ID.");
         }
         const res = await handleDbWrite(dbClient, orgId, runId, step.config as DBWriteStepConfig, context);
         output = res;
