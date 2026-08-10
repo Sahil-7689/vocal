@@ -18,6 +18,12 @@ export const GET_RUNS = gql`
         status
         attempt_count
         created_at
+        workflow_step {
+          id
+          name
+          type
+          position
+        }
       }
     }
   }
@@ -34,7 +40,11 @@ export const GET_RUN = gql`
       started_at
       completed_at
       created_at
-      step_runs {
+      workflow {
+        id
+        name
+      }
+      step_runs(order_by: { created_at: asc }) {
         id
         workflow_run_id
         workflow_step_id
@@ -48,6 +58,12 @@ export const GET_RUN = gql`
         started_at
         completed_at
         created_at
+        workflow_step {
+          id
+          name
+          type
+          position
+        }
       }
     }
   }

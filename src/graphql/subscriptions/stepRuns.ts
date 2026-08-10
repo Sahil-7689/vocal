@@ -19,6 +19,12 @@ export const STEP_RUNS_SUBSCRIPTION = gql`
       started_at
       completed_at
       created_at
+      workflow_step {
+        id
+        name
+        type
+        position
+      }
     }
   }
 `;

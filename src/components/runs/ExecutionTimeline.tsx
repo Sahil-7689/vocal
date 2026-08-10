@@ -38,7 +38,8 @@ export const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({ stepRuns }
       <div className="absolute left-[11px] top-3 bottom-3 w-0.5 bg-outline-variant/60 -z-10" />
 
       {stepRuns.map((step, idx) => {
-        const Icon = stepIcons[step.stepType] || Bot;
+        const typeStr = step.stepType || "llm_call";
+        const Icon = stepIcons[typeStr] || Bot;
         const isCompleted = step.status === "completed";
         const isRunning = step.status === "running";
         const isPaused = step.status === "paused";
@@ -90,10 +91,10 @@ export const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({ stepRuns }
                   </div>
                   <div>
                     <h4 className="font-display font-semibold text-sm text-on-surface">
-                      {step.stepName}
+                      {step.stepName || "Step"}
                     </h4>
                     <p className="font-mono text-[11px] text-on-surface-variant capitalize">
-                      {step.stepType.replace("_", " ")}
+                      {typeStr.replace("_", " ")}
                     </p>
                   </div>
                 </div>

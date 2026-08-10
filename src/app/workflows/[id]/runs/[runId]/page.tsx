@@ -34,20 +34,53 @@ export default function LiveRunMonitorPage() {
   const { data: runData, loading: runLoading } = useQuery(GET_RUN, {
     variables: {
       runId,
-      userOrgId: currentOrganization.id,
     },
     fetchPolicy: "network-only",
   });
 
   // Real-time GraphQL Subscription for live step updates
-  const { data: subData, loading: subLoading } = useSubscription(STEP_RUNS_SUBSCRIPTION, {
+  const { data: subData } = useSubscription(STEP_RUNS_SUBSCRIPTION, {
     variables: { workflowRunId: runId },
   });
 
-  const run: WorkflowRun | null = runData?.workflow_run_by_pk || null;
+  const rawRun = runData?.workflow_runs_by_pk || runData?.workflow_run_by_pk;
+  const rawStepRuns: any[] = subData?.step_runs?.length
+    ? subData.step_runs
+    : rawRun?.step_runs || rawRun?.stepRuns || [];
 
-  // Use subscription step_runs if available, else initial query stepRuns
-  const stepRuns: StepRun[] = subData?.step_runs || run?.stepRuns || [];
+  const run: WorkflowRun | null = rawRun
+    ? {
+        id: rawRun.id,
+        workflowId: rawRun.workflow_id || rawRun.workflowId,
+        workflowName: rawRun.workflow?.name || rawRun.workflowName || "Live Workflow Run",
+        organizationId: rawRun.org_id || rawRun.organizationId,
+        status: rawRun.status,
+        triggeredBy: rawRun.triggered_by || rawRun.triggeredBy || "System",
+        startedAt: rawRun.started_at || rawRun.startedAt,
+        completedAt: rawRun.completed_at || rawRun.completedAt,
+        createdAt: rawRun.created_at || rawRun.createdAt,
+        stepRuns: [],
+      }
+    : null;
+
+  const stepRuns: StepRun[] = rawStepRuns.map((sr: any) => ({
+    id: sr.id,
+    workflowRunId: sr.workflow_run_id || sr.workflowRunId,
+    workflowStepId: sr.workflow_step_id || sr.workflowStepId,
+    stepName: sr.workflow_step?.name || sr.stepName || "Step",
+    stepType: sr.workflow_step?.type || sr.stepType || "llm_call",
+    status: sr.status,
+    input: sr.input,
+    output: sr.output,
+    error: sr.error,
+    attemptCount: sr.attempt_count || sr.attemptCount || 1,
+    approvedBy: sr.approved_by || sr.approvedBy,
+    approvedAt: sr.approved_at || sr.approvedAt,
+    startedAt: sr.started_at || sr.startedAt,
+    completedAt: sr.completed_at || sr.completedAt,
+    createdAt: sr.created_at || sr.createdAt,
+    updatedAt: sr.completed_at || sr.started_at || sr.created_at || new Date().toISOString(),
+  }));
 
   const isCompleted = stepRuns.length > 0 && stepRuns.every((s) => s.status === "completed");
   const isPaused = stepRuns.some((s) => s.status === "paused");
