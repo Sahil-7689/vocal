@@ -2,7 +2,7 @@ import { ApolloClient, InMemoryCache, HttpLink, ApolloLink, split } from "@apoll
 import { GraphQLWsLink } from "@apollo/client/link/subscriptions";
 import { createClient } from "graphql-ws";
 import { getMainDefinition } from "@apollo/client/utilities";
-import { getAccessToken } from "./auth";
+import { getAccessToken, getCurrentUser } from "./auth";
 
 const rawGraphqlUrl = (process.env.NEXT_PUBLIC_GRAPHQL_URL || "").trim();
 const nhostSubdomain = (process.env.NEXT_PUBLIC_NHOST_SUBDOMAIN || "").trim();
@@ -23,10 +23,12 @@ const httpLink = new HttpLink({
 
 const authLink = new ApolloLink((operation, forward) => {
   const token = getAccessToken();
+  const user = getCurrentUser();
   operation.setContext(({ headers = {} }: { headers?: Record<string, string> }) => ({
     headers: {
       ...headers,
       ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(user?.id ? { "x-hasura-user-id": user.id } : {}),
     },
   }));
   return forward(operation);
