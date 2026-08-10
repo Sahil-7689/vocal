@@ -8,6 +8,12 @@ const pool = new Pool({
 });
 
 export default async function handleTriggerWorkflowRun(req: Request, res: Response) {
+  // Enforce CORS Headers for all client origins
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, x-hasura-user-id, x-hasura-role, X-Webhook-Secret");
+  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  if (req.method === "OPTIONS") return res.sendStatus(200);
+
   // ---------------------------------------------------------------
   // Layer 1: Extract authenticated user identity from Hasura header.
   // Injected by Hasura from Nhost JWT — cannot be forged by client.

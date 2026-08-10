@@ -2,20 +2,17 @@ import { Request, Response } from "express";
 import { graphqlAdmin } from "../_shared/graphqlAdmin";
 
 /**
- * createOrganization — Hasura Action handler
- *
- * Security model:
- *   - User identity comes from X-Hasura-User-Id header (set by Nhost/Hasura
- *     from the JWT — the client cannot forge this).
- *   - The client never supplies user_id or role.
- *   - Organization + owner membership are created atomically via a
- *     single GraphQL mutation with admin privileges.
- *   - Uses Hasura GraphQL API (not direct pg) so it works both locally
- *     (pointing at the Nhost cloud DB) and when deployed as an Nhost Function.
+ * createOrganization — Hasura Action & Nhost Function handler
  */
 export default async function handleCreateOrganization(req: Request, res: Response) {
+  // Enforce CORS Headers for all client origins (Vercel frontend, local, etc.)
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, x-hasura-user-id, x-hasura-role, X-Webhook-Secret");
+  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  if (req.method === "OPTIONS") return res.sendStatus(200);
+
   try {
-    // ── Layer 1: Extract authenticated user from Hasura-injected header ──
+    // ── Layer 1: Extract authenticated user from Hasura/client header ──
     const userId = (
       req.headers["x-hasura-user-id"] ||
       req.body?.session_variables?.["x-hasura-user-id"]
@@ -39,9 +36,6 @@ export default async function handleCreateOrganization(req: Request, res: Respon
     }
 
     // ── Atomically create org + owner membership via admin GraphQL ──
-    // Using insert_organizations with a nested insert_org_members ensures
-    // both records are created in a single transaction. If either fails,
-    // neither is committed.
     const result = await graphqlAdmin<{
       insert_organizations_one: {
         id: string;
