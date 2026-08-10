@@ -479,7 +479,7 @@ async function applyPermissions() {
 
   // workflow_runs SELECT
   const wrFilter = { workflow: orgMemberFilter };
-  const wrCols = ["id", "workflow_id", "org_id", "status", "triggered_by", "started_at", "completed_at", "created_at", "error"];
+  const wrCols = ["id", "workflow_id", "org_id", "status", "trigger_type", "triggered_by", "started_at", "completed_at", "created_at", "input", "output", "error"];
   for (const role of ["user", "owner", "editor", "viewer"]) {
     await apply({
       type: "pg_create_select_permission",
