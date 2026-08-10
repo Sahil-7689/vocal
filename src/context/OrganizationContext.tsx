@@ -14,6 +14,8 @@ interface OrganizationContextType {
   hasOrganization: boolean;
   /** True immediately after signup, before the user completes onboarding. */
   pendingOnboarding: boolean;
+  /** True while the org membership Hasura query is in-flight (prevents premature /onboarding redirect). */
+  orgFetching: boolean;
   switchOrganization: (orgId: string) => void;
   switchUserRole: (userId: string, role: OrgRole) => void;
   startOnboardingForNewUser: (user: Partial<User>) => void;
@@ -44,6 +46,7 @@ const OrganizationContext = createContext<OrganizationContextType>({
   members: [],
   hasOrganization: false,
   pendingOnboarding: false,
+  orgFetching: false,
   switchOrganization: () => {},
   switchUserRole: () => {},
   startOnboardingForNewUser: () => {},
@@ -59,6 +62,7 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [members, setMembers] = useState<OrgMember[]>([]);
   const [pendingOnboarding, setPendingOnboarding] = useState(false);
+  const [orgFetching, setOrgFetching] = useState(false);
 
   // 1. Sync currentUser from live Nhost session
   useEffect(() => {
@@ -94,13 +98,21 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }
 
     async function fetchUserOrgMembers() {
+      setOrgFetching(true);
       try {
         const token = getAccessToken();
+        // Always use the hasura subdomain URL (not .graphql. which is wrong)
         const graphqlUrl =
-          (process.env.NEXT_PUBLIC_GRAPHQL_URL || "").trim() ||
+          (process.env.NEXT_PUBLIC_GRAPHQL_URL || "").trim().replace(".graphql.", ".hasura.") ||
           (process.env.NEXT_PUBLIC_NHOST_SUBDOMAIN
-            ? `https://${process.env.NEXT_PUBLIC_NHOST_SUBDOMAIN}.graphql.${process.env.NEXT_PUBLIC_NHOST_REGION || "us-east-1"}.nhost.run/v1/graphql`
-            : "http://localhost:4000/v1/graphql");
+            ? `https://${process.env.NEXT_PUBLIC_NHOST_SUBDOMAIN}.hasura.${process.env.NEXT_PUBLIC_NHOST_REGION || "us-east-1"}.nhost.run/v1/graphql`
+            : "");
+
+        if (!graphqlUrl) {
+          console.warn("[OrganizationContext] No GraphQL URL configured — cannot load org memberships.");
+          setOrgFetching(false);
+          return;
+        }
 
         const query = `
           query GetUserOrgMembers {
@@ -124,14 +136,24 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
           method: "POST",
           headers: {
             "Content-Type": "application/json",
+            // Send JWT Bearer token (Nhost auth)
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            // Send Hasura session variables so RLS permissions fire correctly
             ...(currentUser.id ? { "x-hasura-user-id": currentUser.id } : {}),
+            // CRITICAL: x-hasura-role tells Hasura which permission set to use.
+            // Without this, Hasura defaults to 'anonymous' → org_members returns []
+            "x-hasura-role": "user",
           },
           body: JSON.stringify({ query }),
         });
 
         const json = await res.json();
-        const orgMembers = json?.data?.org_members || [];
+
+        if (json?.errors) {
+          console.error("[OrganizationContext] GraphQL errors:", json.errors);
+        }
+
+        const orgMembers: any[] = json?.data?.org_members || [];
 
         if (Array.isArray(orgMembers) && orgMembers.length > 0) {
           const loadedOrgs: Organization[] = [];
@@ -169,7 +191,9 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
           setMembers([]);
         }
       } catch (err) {
-        console.error("Error fetching user org_members:", err);
+        console.error("[OrganizationContext] Error fetching org_members:", err);
+      } finally {
+        setOrgFetching(false);
       }
     }
 
@@ -267,6 +291,7 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         members: members.filter((m) => m.organizationId === currentOrganization.id),
         hasOrganization,
         pendingOnboarding,
+        orgFetching,
         switchOrganization,
         switchUserRole,
         startOnboardingForNewUser,

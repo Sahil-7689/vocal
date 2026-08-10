@@ -12,16 +12,11 @@ export const AuthGuard: React.FC<{ children: React.ReactNode }> = ({ children })
   const router = useRouter();
   const pathname = usePathname();
   const { isAuthenticated, isLoading } = useAuthenticationStatus();
-  const { hasOrganization, pendingOnboarding } = useOrganization();
+  const { hasOrganization, pendingOnboarding, orgFetching } = useOrganization();
   const [mounted, setMounted] = useState(false);
-  const [authCheckTimeout, setAuthCheckTimeout] = useState(false);
 
   useEffect(() => {
     setMounted(true);
-    const timer = setTimeout(() => {
-      setAuthCheckTimeout(true);
-    }, 2000);
-    return () => clearTimeout(timer);
   }, []);
 
   const isLiveBackend = Boolean(
@@ -33,16 +28,16 @@ export const AuthGuard: React.FC<{ children: React.ReactNode }> = ({ children })
   useEffect(() => {
     if (!mounted) return;
 
-    const isSessionLoading = isLoading && !authCheckTimeout;
+    // Still waiting for Nhost session check or org membership fetch — do nothing yet
+    if (isLoading || orgFetching) return;
 
-    // 1. Unauthenticated user on protected route → redirect to /login
-    if (isLiveBackend && !isSessionLoading && !isAuthenticated && !isPublicRoute) {
+    // 1. Unauthenticated user on protected route → /login
+    if (isLiveBackend && !isAuthenticated && !isPublicRoute) {
       router.replace("/login");
       return;
     }
 
-    // If the user just signed up (pendingOnboarding=true) and is on a public route,
-    // signup page will navigate to /onboarding directly — do not interfere here.
+    // If new signup flow is in progress
     if (pendingOnboarding) {
       if (pathname !== "/onboarding" && !isPublicRoute) {
         router.replace("/onboarding");
@@ -50,26 +45,21 @@ export const AuthGuard: React.FC<{ children: React.ReactNode }> = ({ children })
       return;
     }
 
-    // 2. Authenticated user without an organization on protected routes → /onboarding
+    // 2. Authenticated + no org on protected routes → /onboarding
+    //    Only redirect AFTER orgFetching is complete (prevents false redirect when org loads slowly)
     if (isAuthenticated && !hasOrganization && pathname !== "/onboarding" && !isPublicRoute) {
       router.replace("/onboarding");
       return;
     }
 
-    // 3. Authenticated user WITH an organization trying to visit /onboarding → /dashboard
+    // 3. Authenticated WITH org on /onboarding → /dashboard
     if (isAuthenticated && hasOrganization && pathname === "/onboarding") {
       router.replace("/dashboard");
       return;
     }
 
-    // 4. Authenticated user with an organization visiting public auth routes → /dashboard
-    if (
-      isLiveBackend &&
-      !isSessionLoading &&
-      isAuthenticated &&
-      isPublicRoute &&
-      pathname !== "/forgot-password"
-    ) {
+    // 4. Authenticated WITH org visiting public auth routes → /dashboard
+    if (isLiveBackend && isAuthenticated && isPublicRoute && pathname !== "/forgot-password") {
       if (hasOrganization) {
         router.replace("/dashboard");
       } else {
@@ -80,7 +70,7 @@ export const AuthGuard: React.FC<{ children: React.ReactNode }> = ({ children })
   }, [
     isLiveBackend,
     isLoading,
-    authCheckTimeout,
+    orgFetching,
     isAuthenticated,
     hasOrganization,
     pendingOnboarding,
@@ -92,12 +82,14 @@ export const AuthGuard: React.FC<{ children: React.ReactNode }> = ({ children })
 
   if (!mounted) return null;
 
-  // Show loading spinner while Nhost determines session on protected routes (max 2 seconds)
-  if (isLiveBackend && isLoading && !authCheckTimeout && !isPublicRoute) {
+  // Show loading spinner while Nhost session OR org membership fetch is in-flight on protected routes
+  if (isLiveBackend && (isLoading || orgFetching) && !isPublicRoute) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-background text-on-surface font-mono text-xs space-y-3">
         <Loader2 className="w-6 h-6 animate-spin text-primary" />
-        <span className="text-on-surface-variant">Verifying session...</span>
+        <span className="text-on-surface-variant">
+          {isLoading ? "Verifying session..." : "Loading organization..."}
+        </span>
       </div>
     );
   }
