@@ -5,8 +5,10 @@ import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
+import { useMutation } from "@apollo/client";
+import { gql } from "@apollo/client";
 import { useOrganization } from "@/context/OrganizationContext";
-import { getAccessToken, getCurrentUser } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
 import { Building2, Sparkles, Loader2, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
 
@@ -19,11 +21,30 @@ const onboardingSchema = z.object({
 
 type OnboardingFormValues = z.infer<typeof onboardingSchema>;
 
+const CREATE_ORGANIZATION_DIRECT = gql`
+  mutation CreateOrganizationDirect($name: String!, $userId: uuid!) {
+    insert_organizations_one(object: {
+      name: $name
+      quota_allowed: 100
+      quota_used: 0
+      members: {
+        data: [{
+          user_id: $userId
+          role: "owner"
+        }]
+      }
+    }) {
+      id
+      name
+    }
+  }
+`;
+
 export default function OnboardingPage() {
   const router = useRouter();
   const { completeOnboarding } = useOrganization();
-  const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [createOrgMutation, { loading }] = useMutation(CREATE_ORGANIZATION_DIRECT);
 
   const currentUser = getCurrentUser();
 
@@ -39,80 +60,24 @@ export default function OnboardingPage() {
   });
 
   const onSubmit = async (data: OnboardingFormValues) => {
-    setLoading(true);
     setErrorMessage(null);
 
-    const token = getAccessToken();
-    const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000").replace(/\/$/, "");
-
-    // 1. Try local Express backend API first
-    try {
-      const res = await fetch(`${apiUrl}/v1/create-organization`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          ...(currentUser?.id ? { "x-hasura-user-id": currentUser.id } : {}),
-        },
-        body: JSON.stringify({ name: data.name }),
-      });
-
-      const result = await res.json();
-
-      if (res.ok && result.org_id) {
-        completeOnboarding(result.name || data.name, result.org_id);
-        toast.success(`Organization "${data.name}" created! Role assigned: Owner`);
-        router.push("/dashboard");
-        return;
-      }
-    } catch (err) {
-      // Ignore network error for local Express server — fallback to direct Hasura GraphQL below
+    if (!currentUser?.id || currentUser.id === "unauthenticated") {
+      const errMsg = "Unauthenticated: Please log in first.";
+      setErrorMessage(errMsg);
+      toast.error(errMsg);
+      return;
     }
 
-    // 2. Direct Hasura GraphQL Fallback (for live production Vercel deployment)
     try {
-      const graphqlUrl =
-        (process.env.NEXT_PUBLIC_GRAPHQL_URL || "").trim().replace(".graphql.", ".hasura.") ||
-        (process.env.NEXT_PUBLIC_NHOST_SUBDOMAIN
-          ? `https://${process.env.NEXT_PUBLIC_NHOST_SUBDOMAIN}.hasura.${process.env.NEXT_PUBLIC_NHOST_REGION || "us-east-1"}.nhost.run/v1/graphql`
-          : "");
-
-      if (!graphqlUrl) {
-        throw new Error("No GraphQL URL configured.");
-      }
-
-      const gqlRes = await fetch(graphqlUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          ...(currentUser?.id ? { "x-hasura-user-id": currentUser.id } : {}),
-          "x-hasura-role": "user",
+      const res = await createOrgMutation({
+        variables: {
+          name: data.name,
+          userId: currentUser.id,
         },
-        body: JSON.stringify({
-          query: `mutation CreateOrganizationDirect($name: String!, $userId: uuid!) {
-            insert_organizations_one(object: {
-              name: $name
-              quota_allowed: 100
-              quota_used: 0
-              members: {
-                data: [{
-                  user_id: $userId
-                  role: "owner"
-                }]
-              }
-            }) {
-              id
-              name
-            }
-          }`,
-          variables: { name: data.name, userId: currentUser?.id },
-        }),
       });
 
-      const gqlJson = await gqlRes.json();
-      const newOrg = gqlJson?.data?.insert_organizations_one;
-
+      const newOrg = res?.data?.insert_organizations_one;
       if (newOrg?.id) {
         completeOnboarding(newOrg.name || data.name, newOrg.id);
         toast.success(`Organization "${data.name}" created! Role assigned: Owner`);
@@ -120,16 +85,11 @@ export default function OnboardingPage() {
         return;
       }
 
-      if (gqlJson?.errors?.length) {
-        throw new Error(gqlJson.errors[0].message);
-      }
       throw new Error("Unable to create organization.");
     } catch (err: any) {
       const errMsg = err?.message || "Failed to create organization. Please try again.";
       setErrorMessage(errMsg);
       toast.error(errMsg);
-    } finally {
-      setLoading(false);
     }
   };
 

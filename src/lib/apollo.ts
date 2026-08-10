@@ -15,7 +15,7 @@ const httpUri =
   graphqlUrl ||
   (nhostSubdomain
     ? `https://${nhostSubdomain}.hasura.${nhostRegion}.nhost.run/v1/graphql`
-    : "http://localhost:4000/v1/graphql");
+    : "https://aczgogsmgomurtssjxok.hasura.ap-south-1.nhost.run/v1/graphql");
 
 const httpLink = new HttpLink({
   uri: httpUri,

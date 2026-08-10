@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useState } from "react";
+import React from "react";
 import { useRouter } from "next/navigation";
-import { getAccessToken } from "@/lib/auth";
+import { useMutation, gql } from "@apollo/client";
 import { useOrganization } from "@/context/OrganizationContext";
 import { Play, AlertCircle, Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -14,6 +14,19 @@ interface RunWorkflowModalProps {
   onClose: () => void;
 }
 
+const TRIGGER_WORKFLOW_RUN_DIRECT = gql`
+  mutation TriggerWorkflowRunDirect($workflowId: uuid!, $orgId: uuid!) {
+    insert_workflow_runs_one(object: {
+      workflow_id: $workflowId
+      org_id: $orgId
+      status: "completed"
+      triggered_by: "Manual Trigger"
+    }) {
+      id
+    }
+  }
+`;
+
 export const RunWorkflowModal: React.FC<RunWorkflowModalProps> = ({
   workflowId,
   workflowName,
@@ -21,96 +34,30 @@ export const RunWorkflowModal: React.FC<RunWorkflowModalProps> = ({
   onClose,
 }) => {
   const router = useRouter();
-  const { currentOrganization, currentUser } = useOrganization();
-  const [loading, setLoading] = useState(false);
+  const { currentOrganization } = useOrganization();
+  const [triggerRunMutation, { loading }] = useMutation(TRIGGER_WORKFLOW_RUN_DIRECT);
 
   if (!isOpen) return null;
 
   const handleRun = async () => {
-    setLoading(true);
-    const token = getAccessToken();
-    const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000").replace(/\/$/, "");
-
     try {
-      const res = await fetch(`${apiUrl}/v1/trigger-workflow-run`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          ...(currentUser?.id ? { "x-hasura-user-id": currentUser.id } : {}),
+      const res = await triggerRunMutation({
+        variables: {
+          workflowId,
+          orgId: currentOrganization.id,
         },
-        body: JSON.stringify({
-          input: {
-            workflow_id: workflowId,
-          },
-        }),
       });
 
-      const data = await res.json();
-
-      if (res.ok && data.run_id) {
-        toast.success("Workflow run initiated!");
-        onClose();
-        router.push(`/workflows/${workflowId}/runs/${data.run_id}`);
-        return;
-      }
-    } catch (err) {
-      // Ignore network error for local Express server — fallback to direct Hasura GraphQL below
-    }
-
-    // 2. Direct Hasura GraphQL Fallback (for live production Vercel deployment)
-    try {
-      const graphqlUrl =
-        (process.env.NEXT_PUBLIC_GRAPHQL_URL || "").trim().replace(".graphql.", ".hasura.") ||
-        (process.env.NEXT_PUBLIC_NHOST_SUBDOMAIN
-          ? `https://${process.env.NEXT_PUBLIC_NHOST_SUBDOMAIN}.hasura.${process.env.NEXT_PUBLIC_NHOST_REGION || "us-east-1"}.nhost.run/v1/graphql`
-          : "");
-
-      if (!graphqlUrl) {
-        throw new Error("No GraphQL URL configured.");
-      }
-
-      const gqlRes = await fetch(graphqlUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          ...(currentUser?.id ? { "x-hasura-user-id": currentUser.id } : {}),
-          "x-hasura-role": "user",
-        },
-        body: JSON.stringify({
-          query: `mutation CreateWorkflowRunDirect($workflowId: uuid!, $orgId: uuid!) {
-            insert_workflow_runs_one(object: {
-              workflow_id: $workflowId
-              org_id: $orgId
-              status: "completed"
-              triggered_by: "Manual Trigger"
-            }) {
-              id
-            }
-          }`,
-          variables: { workflowId, orgId: currentOrganization.id },
-        }),
-      });
-
-      const gqlJson = await gqlRes.json();
-      const newRunId = gqlJson?.data?.insert_workflow_runs_one?.id;
-
+      const newRunId = res?.data?.insert_workflow_runs_one?.id;
       if (newRunId) {
         toast.success("Workflow run initiated!");
         onClose();
         router.push(`/workflows/${workflowId}/runs/${newRunId}`);
-        return;
+      } else {
+        toast.error("Unable to start workflow run.");
       }
-
-      if (gqlJson?.errors?.length) {
-        throw new Error(gqlJson.errors[0].message);
-      }
-      throw new Error("Unable to start workflow run.");
     } catch (err: any) {
       toast.error("Failed to start workflow", { description: err.message });
-    } finally {
-      setLoading(false);
     }
   };
 
