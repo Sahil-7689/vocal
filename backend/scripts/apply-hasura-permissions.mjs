@@ -377,6 +377,106 @@ async function applyPermissions() {
     }, `workflows:${role} DELETE`);
   }
 
+  // workflow_steps SELECT/INSERT/UPDATE/DELETE
+  const wsFilter = { workflow: orgMemberFilter };
+  const wsCols = ["id", "workflow_id", "position", "name", "type", "config", "created_at", "updated_at"];
+  for (const role of ["user", "owner", "editor", "viewer"]) {
+    await apply({
+      type: "pg_create_select_permission",
+      args: {
+        source: "default",
+        table: { schema: "public", name: "workflow_steps" },
+        role,
+        permission: { columns: wsCols, filter: wsFilter },
+      },
+    }, `workflow_steps:${role} SELECT`);
+  }
+  for (const role of ["user", "owner", "editor"]) {
+    await apply({
+      type: "pg_create_insert_permission",
+      args: {
+        source: "default",
+        table: { schema: "public", name: "workflow_steps" },
+        role,
+        permission: {
+          columns: ["workflow_id", "position", "name", "type", "config"],
+          check: wsFilter,
+        },
+      },
+    }, `workflow_steps:${role} INSERT`);
+    await apply({
+      type: "pg_create_update_permission",
+      args: {
+        source: "default",
+        table: { schema: "public", name: "workflow_steps" },
+        role,
+        permission: {
+          columns: ["position", "name", "type", "config"],
+          filter: wsFilter,
+        },
+      },
+    }, `workflow_steps:${role} UPDATE`);
+    await apply({
+      type: "pg_create_delete_permission",
+      args: {
+        source: "default",
+        table: { schema: "public", name: "workflow_steps" },
+        role,
+        permission: { filter: wsFilter },
+      },
+    }, `workflow_steps:${role} DELETE`);
+  }
+
+  // workflow_triggers SELECT/INSERT/UPDATE/DELETE
+  const wtFilter = { workflow: orgMemberFilter };
+  const wtCols = ["id", "workflow_id", "type", "config", "enabled", "created_at", "updated_at"];
+  for (const role of ["user", "owner", "editor", "viewer"]) {
+    await apply({
+      type: "pg_create_select_permission",
+      args: {
+        source: "default",
+        table: { schema: "public", name: "workflow_triggers" },
+        role,
+        permission: { columns: wtCols, filter: wtFilter },
+      },
+    }, `workflow_triggers:${role} SELECT`);
+  }
+  for (const role of ["user", "owner", "editor"]) {
+    await apply({
+      type: "pg_create_insert_permission",
+      args: {
+        source: "default",
+        table: { schema: "public", name: "workflow_triggers" },
+        role,
+        permission: {
+          columns: ["workflow_id", "type", "config", "enabled"],
+          check: wtFilter,
+        },
+      },
+    }, `workflow_triggers:${role} INSERT`);
+    await apply({
+      type: "pg_create_update_permission",
+      args: {
+        source: "default",
+        table: { schema: "public", name: "workflow_triggers" },
+        role,
+        permission: {
+          columns: ["type", "config", "enabled"],
+          filter: wtFilter,
+        },
+      },
+    }, `workflow_triggers:${role} UPDATE`);
+    await apply({
+      type: "pg_create_delete_permission",
+      args: {
+        source: "default",
+        table: { schema: "public", name: "workflow_triggers" },
+        role,
+        permission: { filter: wtFilter },
+      },
+    }, `workflow_triggers:${role} DELETE`);
+  }
+
   // workflow_runs SELECT
   const wrFilter = { workflow: orgMemberFilter };
   const wrCols = ["id", "workflow_id", "org_id", "status", "triggered_by", "started_at", "completed_at", "created_at", "error"];
