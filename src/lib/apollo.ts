@@ -28,7 +28,12 @@ const authLink = new ApolloLink((operation, forward) => {
     headers: {
       ...headers,
       ...(token ? { authorization: `Bearer ${token}` } : {}),
-      ...(user?.id ? { "x-hasura-user-id": user.id } : {}),
+      ...(user?.id
+        ? {
+            "x-hasura-user-id": user.id,
+            "x-hasura-role": "user",
+          }
+        : {}),
     },
   }));
   return forward(operation);
