@@ -20,6 +20,8 @@ import {
 
 interface ExecutionTimelineProps {
   stepRuns: StepRun[];
+  workflowId?: string;
+  onApproveSuccess?: () => void;
 }
 
 const stepIcons: Record<string, React.ElementType> = {
@@ -31,7 +33,7 @@ const stepIcons: Record<string, React.ElementType> = {
   approval_gate: ShieldAlert,
 };
 
-export const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({ stepRuns }) => {
+export const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({ stepRuns, workflowId, onApproveSuccess }) => {
   return (
     <div className="relative pl-6 space-y-8 my-6">
       {/* Vertical Connecting Line */}
@@ -125,7 +127,13 @@ export const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({ stepRuns }
               </div>
 
               {/* Conditional Approval or Error Cards */}
-              {isPaused && <ApprovalCard stepRun={step} />}
+              {isPaused && (
+                <ApprovalCard
+                  stepRun={step}
+                  workflowId={workflowId}
+                  onApproveSuccess={onApproveSuccess}
+                />
+              )}
               {isFailed && <FailedStepCard stepRun={step} />}
 
               {/* Output Preview */}

@@ -10,6 +10,8 @@ import { toast } from "sonner";
 
 interface ApprovalCardProps {
   stepRun: StepRun;
+  workflowId?: string;
+  onApproveSuccess?: () => void;
 }
 
 const APPROVE_AND_RESUME = gql`
@@ -37,7 +39,7 @@ const APPROVE_AND_RESUME = gql`
   }
 `;
 
-export const ApprovalCard: React.FC<ApprovalCardProps> = ({ stepRun }) => {
+export const ApprovalCard: React.FC<ApprovalCardProps> = ({ stepRun, workflowId, onApproveSuccess }) => {
   const { currentRole, currentUser } = useOrganization();
   const [approveMutation, { loading }] = useMutation(APPROVE_AND_RESUME);
   const [isDone, setIsDone] = useState(false);
@@ -45,9 +47,13 @@ export const ApprovalCard: React.FC<ApprovalCardProps> = ({ stepRun }) => {
   // Role Matrix: owner OR editor can approve, viewer is denied
   const canApprove = currentRole === "owner" || currentRole === "editor";
 
+  // Query workflow steps by parent workflowId (not workflowStepId)
+  const targetWfId = workflowId || stepRun.workflowStepId;
+
   const { data: wfData } = useQuery(GET_WORKFLOW, {
-    variables: { id: stepRun.workflowStepId },
-    skip: !stepRun.workflowStepId,
+    variables: { id: targetWfId },
+    skip: !targetWfId,
+    fetchPolicy: "cache-and-network",
   });
 
   const handleApprove = async () => {
@@ -88,6 +94,9 @@ export const ApprovalCard: React.FC<ApprovalCardProps> = ({ stepRun }) => {
 
       setIsDone(true);
       toast.success("Approved", { description: "Workflow execution resumed and completed." });
+      if (onApproveSuccess) {
+        onApproveSuccess();
+      }
     } catch (err: any) {
       toast.error("Unable to approve step", { description: err.message });
     }

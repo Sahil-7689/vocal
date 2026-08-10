@@ -27,7 +27,7 @@ export default function LiveRunMonitorPage() {
   const { currentOrganization } = useOrganization();
 
   // Initial Run metadata & workflow steps query
-  const { data: runData, loading: runLoading } = useQuery(GET_RUN, {
+  const { data: runData, loading: runLoading, refetch: refetchRun } = useQuery(GET_RUN, {
     variables: {
       runId,
     },
@@ -230,7 +230,11 @@ export default function LiveRunMonitorPage() {
                 Initializing execution stream...
               </div>
             ) : (
-              <ExecutionTimeline stepRuns={mergedSteps} />
+              <ExecutionTimeline
+                stepRuns={mergedSteps}
+                workflowId={workflowId}
+                onApproveSuccess={() => refetchRun()}
+              />
             )}
           </div>
         </main>
