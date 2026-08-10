@@ -67,9 +67,10 @@ export const RunWorkflowModal: React.FC<RunWorkflowModalProps> = ({
   const [triggerRunWithStepsMutation, { loading: loadingRun }] = useMutation(TRIGGER_WORKFLOW_RUN_WITH_STEPS);
   const [insertDefaultStepMutation, { loading: loadingStep }] = useMutation(INSERT_DEFAULT_WORKFLOW_STEP);
 
-  const { data: wfData } = useQuery(GET_WORKFLOW, {
+  const { data: wfData, refetch: refetchWf } = useQuery(GET_WORKFLOW, {
     variables: { id: workflowId },
     skip: !isOpen || !workflowId,
+    fetchPolicy: "network-only",
   });
 
   if (!isOpen) return null;
@@ -82,7 +83,19 @@ export const RunWorkflowModal: React.FC<RunWorkflowModalProps> = ({
 
   const handleRun = async () => {
     try {
-      const steps = wfData?.workflows_by_pk?.steps || wfData?.workflow_by_pk?.steps || [];
+      // Live network query to guarantee latest PostgreSQL workflow_steps.id UUIDs
+      let freshRes;
+      try {
+        freshRes = await refetchWf({ id: workflowId });
+      } catch {}
+
+      const steps =
+        freshRes?.data?.workflows_by_pk?.steps ||
+        freshRes?.data?.workflow_by_pk?.steps ||
+        wfData?.workflows_by_pk?.steps ||
+        wfData?.workflow_by_pk?.steps ||
+        [];
+
       let validSteps = steps.filter((s: any) => s.id && isValidUuid(s.id));
 
       // If workflow has 0 steps in PostgreSQL, persist a default step row first to get a real database UUID
