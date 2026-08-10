@@ -15,14 +15,17 @@ import {
   subscribeToMockStepRuns,
 } from "./mockBackend";
 
-const graphqlUrl = (process.env.NEXT_PUBLIC_GRAPHQL_URL || "").trim();
+const rawGraphqlUrl = (process.env.NEXT_PUBLIC_GRAPHQL_URL || "").trim();
 const nhostSubdomain = (process.env.NEXT_PUBLIC_NHOST_SUBDOMAIN || "").trim();
 const nhostRegion = (process.env.NEXT_PUBLIC_NHOST_REGION || "us-east-1").trim();
+
+// Ensure correct Nhost Hasura subdomain format (.hasura. instead of .graphql.)
+const graphqlUrl = rawGraphqlUrl.replace(".graphql.", ".hasura.");
 
 const httpUri =
   graphqlUrl ||
   (nhostSubdomain
-    ? `https://${nhostSubdomain}.graphql.${nhostRegion}.nhost.run/v1/graphql`
+    ? `https://${nhostSubdomain}.hasura.${nhostRegion}.nhost.run/v1/graphql`
     : "http://localhost:4000/v1/graphql");
 
 const httpLink = new HttpLink({
@@ -109,7 +112,7 @@ const errorFallbackLink = new ApolloLink((operation, forward) => {
     const sub = forward(operation).subscribe({
       next: (result) => observer.next(result),
       error: (networkError) => {
-        console.warn(`[Apollo] Primary GraphQL server returned error/404 (${networkError?.message || networkError}). Falling back to local workspace link.`);
+        console.warn(`[Apollo] Primary GraphQL server returned error (${networkError?.message || networkError}). Falling back to workspace link.`);
         mockApolloLink.request(operation)?.subscribe({
           next: (res) => observer.next(res),
           error: (err) => observer.error(err),
@@ -126,7 +129,7 @@ const errorFallbackLink = new ApolloLink((operation, forward) => {
 const wsUri = graphqlUrl
   ? graphqlUrl.replace(/^http/, "ws")
   : nhostSubdomain
-  ? `wss://${nhostSubdomain}.graphql.${nhostRegion}.nhost.run/v1/graphql`
+  ? `wss://${nhostSubdomain}.hasura.${nhostRegion}.nhost.run/v1/graphql`
   : "";
 
 const wsLink =
