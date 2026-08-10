@@ -11,8 +11,8 @@ export async function graphqlAdmin<T = any>(
   variables: Record<string, any> = {}
 ): Promise<T> {
   const endpoint =
-    process.env.HASURA_GRAPHQL_ENDPOINT ||
-    `https://${process.env.NHOST_SUBDOMAIN}.graphql.${process.env.NHOST_REGION}.nhost.run/v1/graphql`;
+    (process.env.HASURA_GRAPHQL_ENDPOINT || "").replace(".graphql.", ".hasura.") ||
+    `https://${process.env.NHOST_SUBDOMAIN}.hasura.${process.env.NHOST_REGION}.nhost.run/v1/graphql`;
 
   const adminSecret = process.env.HASURA_GRAPHQL_ADMIN_SECRET;
 
