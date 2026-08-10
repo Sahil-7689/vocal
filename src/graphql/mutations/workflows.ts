@@ -59,8 +59,22 @@ export const SAVE_WORKFLOW = gql`
     delete_workflow_steps(where: { workflow_id: { _eq: $id } }) {
       affected_rows
     }
-    insert_workflow_steps(objects: $steps) {
+    insert_workflow_steps(
+      objects: $steps
+      on_conflict: {
+        constraint: unique_workflow_position
+        update_columns: [name, type, config]
+      }
+    ) {
       affected_rows
+      returning {
+        id
+        workflow_id
+        position
+        name
+        type
+        config
+      }
     }
   }
 `;

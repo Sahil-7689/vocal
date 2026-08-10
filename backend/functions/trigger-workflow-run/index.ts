@@ -121,13 +121,19 @@ export default async function handleTriggerWorkflowRun(req: Request, res: Respon
         insert_workflow_steps_one: WorkflowStep;
       }>(
         `mutation InsertDefaultStep($workflowId: uuid!) {
-          insert_workflow_steps_one(object: {
-            workflow_id: $workflowId
-            position: 1
-            name: "AI Processing Step"
-            type: "llm_call"
-            config: { provider: "openai", model: "gpt-4o", prompt: "Analyze workflow input data." }
-          }) {
+          insert_workflow_steps_one(
+            object: {
+              workflow_id: $workflowId
+              position: 1
+              name: "AI Processing Step"
+              type: "llm_call"
+              config: { provider: "openai", model: "gpt-4o", prompt: "Analyze workflow input data." }
+            }
+            on_conflict: {
+              constraint: unique_workflow_position
+              update_columns: [name, type, config]
+            }
+          ) {
             id
             workflow_id
             position
