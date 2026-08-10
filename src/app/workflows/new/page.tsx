@@ -31,9 +31,10 @@ export default function NewWorkflowPage() {
       try {
         const res = await createWorkflowMutation({
           variables: {
-            org_id: currentOrganization.id.includes("-") && currentOrganization.id.length === 36
-              ? currentOrganization.id
-              : "a0000000-0000-0000-0000-000000000001",
+            org_id:
+              currentOrganization.id && currentOrganization.id.length === 36 && currentOrganization.id.includes("-")
+                ? currentOrganization.id
+                : "a0000000-0000-0000-0000-000000000001",
             name: "Untitled AI Workflow",
             description: "Automated workflow process.",
             status: "active",

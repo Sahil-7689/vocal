@@ -78,9 +78,36 @@ export default function WorkflowBuilderPage() {
 
   const [saveWorkflowMutation, { loading: saving }] = useMutation(SAVE_WORKFLOW);
 
-  // Resolve active workflow from Hasura GraphQL or local workspace fallback
-  const activeWorkflow: Workflow | null =
-    data?.workflow_by_pk || getMockWorkflow(workflowId, currentOrganization.id);
+  const rawWf = data?.workflows_by_pk || data?.workflow_by_pk;
+  const activeWorkflow: Workflow | null = rawWf
+    ? {
+        id: rawWf.id,
+        organizationId: rawWf.org_id || rawWf.organizationId,
+        name: rawWf.name,
+        description: rawWf.description,
+        status: rawWf.status,
+        createdAt: rawWf.created_at || rawWf.createdAt,
+        updatedAt: rawWf.updated_at || rawWf.updatedAt,
+        createdBy: rawWf.created_by || rawWf.createdBy,
+        steps: (rawWf.steps || []).map((s: any) => ({
+          id: s.id,
+          workflowId: s.workflow_id || s.workflowId,
+          type: s.type,
+          name: s.name,
+          positionX: s.position_x || s.positionX || 300,
+          positionY: s.position_y || s.positionY || 150,
+          config: s.config,
+          nextStepId: s.next_step_id || s.nextStepId,
+        })),
+        triggers: (rawWf.triggers || []).map((t: any) => ({
+          id: t.id,
+          workflowId: t.workflow_id || t.workflowId,
+          type: t.type,
+          config: t.config,
+          isRestricted: !t.enabled,
+        })),
+      }
+    : getMockWorkflow(workflowId, currentOrganization.id);
 
   // Synchronize React Flow nodes & edges from resolved active workflow
   useEffect(() => {

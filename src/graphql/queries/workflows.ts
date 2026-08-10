@@ -1,64 +1,60 @@
 import { gql } from "@apollo/client";
 
 export const GET_WORKFLOWS = gql`
-  query GetWorkflows($orgId: String!) {
-    workflows(where: { organizationId: { _eq: $orgId } }, order_by: { updatedAt: desc }) {
+  query GetWorkflows($orgId: uuid!) {
+    workflows(where: { org_id: { _eq: $orgId } }, order_by: { updated_at: desc }) {
       id
-      organizationId
+      org_id
       name
       description
       status
-      createdAt
-      updatedAt
-      createdBy
+      created_at
+      updated_at
+      created_by
       steps {
         id
-        workflowId
-        type
+        workflow_id
+        position
         name
-        positionX
-        positionY
+        type
         config
-        nextStepId
       }
       triggers {
         id
-        workflowId
+        workflow_id
         type
         config
-        isRestricted
+        enabled
       }
     }
   }
 `;
 
 export const GET_WORKFLOW = gql`
-  query GetWorkflow($id: String!, $userOrgId: String!) {
-    workflow_by_pk(id: $id) {
+  query GetWorkflow($id: uuid!) {
+    workflows_by_pk(id: $id) {
       id
-      organizationId
+      org_id
       name
       description
       status
-      createdAt
-      updatedAt
-      createdBy
+      created_at
+      updated_at
+      created_by
       steps {
         id
-        workflowId
-        type
+        workflow_id
+        position
         name
-        positionX
-        positionY
+        type
         config
-        nextStepId
       }
       triggers {
         id
-        workflowId
+        workflow_id
         type
         config
-        isRestricted
+        enabled
       }
     }
   }

@@ -1,60 +1,53 @@
 import { gql } from "@apollo/client";
 
 export const GET_RUNS = gql`
-  query GetRuns($orgId: String!) {
-    workflow_runs(where: { organizationId: { _eq: $orgId } }, order_by: { createdAt: desc }) {
+  query GetRuns($orgId: uuid!) {
+    workflow_runs(where: { org_id: { _eq: $orgId } }, order_by: { created_at: desc }) {
       id
-      workflowId
-      workflowName
-      organizationId
+      workflow_id
+      org_id
       status
-      triggeredBy
-      startedAt
-      completedAt
-      createdAt
-      stepRuns {
+      triggered_by
+      started_at
+      completed_at
+      created_at
+      step_runs {
         id
-        workflowRunId
-        workflowStepId
-        stepName
-        stepType
+        workflow_run_id
+        workflow_step_id
         status
-        attemptCount
-        durationMs
-        createdAt
+        attempt_count
+        created_at
       }
     }
   }
 `;
 
 export const GET_RUN = gql`
-  query GetRun($runId: String!, $userOrgId: String!) {
-    workflow_run_by_pk(id: $runId) {
+  query GetRun($runId: uuid!) {
+    workflow_runs_by_pk(id: $runId) {
       id
-      workflowId
-      workflowName
-      organizationId
+      workflow_id
+      org_id
       status
-      triggeredBy
-      startedAt
-      completedAt
-      createdAt
-      stepRuns {
+      triggered_by
+      started_at
+      completed_at
+      created_at
+      step_runs {
         id
-        workflowRunId
-        workflowStepId
-        stepName
-        stepType
+        workflow_run_id
+        workflow_step_id
         status
         input
         output
         error
-        attemptCount
-        approvedBy
-        approvedAt
-        durationMs
-        createdAt
-        updatedAt
+        attempt_count
+        approved_by
+        approved_at
+        started_at
+        completed_at
+        created_at
       }
     }
   }

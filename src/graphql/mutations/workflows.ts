@@ -28,34 +28,25 @@ export const CREATE_WORKFLOW_HASURA = gql`
   }
 `;
 
-export const SAVE_WORKFLOW = gql`
-  mutation SaveWorkflow($input: SaveWorkflowInput!) {
-    saveWorkflow(input: $input) {
+export const UPDATE_WORKFLOW_HASURA = gql`
+  mutation UpdateWorkflowHasura($id: uuid!, $name: String, $description: String, $status: String) {
+    update_workflows_by_pk(
+      pk_columns: { id: $id }
+      _set: { name: $name, description: $description, status: $status }
+    ) {
       id
-      organizationId
+      org_id
       name
       description
       status
-      updatedAt
-      steps {
-        id
-        type
-        name
-        positionX
-        positionY
-        config
-      }
-      triggers {
-        id
-        type
-        config
-      }
     }
   }
 `;
 
+export const SAVE_WORKFLOW = UPDATE_WORKFLOW_HASURA;
+
 export const DELETE_WORKFLOW = gql`
-  mutation DeleteWorkflow($id: String!) {
+  mutation DeleteWorkflow($id: uuid!) {
     delete_workflows_by_pk(id: $id) {
       id
     }
