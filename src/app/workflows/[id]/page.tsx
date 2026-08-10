@@ -115,8 +115,23 @@ export default function WorkflowBuilderPage() {
       setWorkflowName(activeWorkflow.name);
       setTriggers(activeWorkflow.triggers || []);
 
+      let stepList = activeWorkflow.steps || [];
+      if (stepList.length === 0) {
+        stepList = [
+          {
+            id: `step-init-${Date.now()}`,
+            workflowId: activeWorkflow.id,
+            type: "llm_call",
+            name: "AI Processing Step",
+            positionX: 300,
+            positionY: 150,
+            config: { provider: "openai", model: "gpt-4o", prompt: "Analyze workflow input data." },
+          },
+        ];
+      }
+
       // Map steps to React Flow nodes
-      const initialNodes: Node[] = (activeWorkflow.steps || []).map((step, idx) => ({
+      const initialNodes: Node[] = stepList.map((step, idx) => ({
         id: step.id,
         type: "customStepNode",
         position: {
@@ -133,7 +148,7 @@ export default function WorkflowBuilderPage() {
 
       // Generate connecting edges from nextStepId
       const initialEdges: Edge[] = [];
-      (activeWorkflow.steps || []).forEach((step) => {
+      stepList.forEach((step) => {
         if (step.nextStepId) {
           initialEdges.push({
             id: `e-${step.id}-${step.nextStepId}`,
@@ -158,25 +173,20 @@ export default function WorkflowBuilderPage() {
     }
 
     try {
-      const stepInputs: WorkflowStep[] = nodes.map((node) => {
-        const nextEdge = edges.find((e) => e.source === node.id);
-        return {
-          id: node.id,
-          workflowId,
-          type: (node.data.type || "llm_call") as any,
-          name: (node.data.name || "Step") as string,
-          positionX: Math.round(node.position.x),
-          positionY: Math.round(node.position.y),
-          config: (node.data.config || {}) as any,
-          nextStepId: nextEdge ? nextEdge.target : null,
-        };
-      });
+      const stepPayload = nodes.map((node, idx) => ({
+        workflow_id: workflowId,
+        position: idx + 1,
+        name: (node.data.name || "Step") as string,
+        type: (node.data.type || "llm_call") as string,
+        config: (node.data.config || {}) as any,
+      }));
 
       await saveWorkflowMutation({
         variables: {
           id: workflowId,
           name: workflowName,
           status: "active",
+          steps: stepPayload,
         },
       });
 
