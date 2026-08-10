@@ -88,12 +88,14 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }
   }, [nhostUser, isAuthenticated]);
 
-  // 2. Fetch real org_members and organizations from PostgreSQL via Hasura GraphQL
+  // 2. Fetch real org_members and organizations from PostgreSQL via Hasura GraphQL.
+  // Depends on isAuthenticated so we only run this when Nhost has a valid JWT session.
   useEffect(() => {
-    if (!currentUser.id || currentUser.id === "unauthenticated") {
+    if (!currentUser.id || currentUser.id === "unauthenticated" || !isAuthenticated) {
       setOrganizations([]);
       setMembers([]);
       setCurrentOrgId(null);
+      setOrgFetching(false);
       return;
     }
 
@@ -136,16 +138,26 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            // Send JWT Bearer token (Nhost auth)
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            // Send Hasura session variables so RLS permissions fire correctly
-            ...(currentUser.id ? { "x-hasura-user-id": currentUser.id } : {}),
-            // CRITICAL: x-hasura-role tells Hasura which permission set to use.
-            // Without this, Hasura defaults to 'anonymous' → org_members returns []
-            "x-hasura-role": "user",
+            // If no token is available (session not ready yet), bail out early.
+            // Sending x-hasura-role: user without a valid JWT causes 401.
+            ...(token
+              ? {
+                  Authorization: `Bearer ${token}`,
+                  "x-hasura-user-id": currentUser.id,
+                  // x-hasura-role only valid when JWT is present and role is in allowed-roles
+                  "x-hasura-role": "user",
+                }
+              : {}),
           },
           body: JSON.stringify({ query }),
         });
+
+        if (res.status === 401) {
+          // Token not yet ready (race condition right after login) — retry once after a delay
+          console.warn("[OrganizationContext] 401 from Hasura — token may not be ready. Retrying in 1.5s...");
+          setTimeout(() => fetchUserOrgMembers(), 1500);
+          return;
+        }
 
         const json = await res.json();
 
@@ -198,7 +210,7 @@ export const OrganizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }
 
     fetchUserOrgMembers();
-  }, [currentUser.id]);
+  }, [currentUser.id, isAuthenticated]);
 
   const userMemberships =
     currentUser.id && currentUser.id !== "unauthenticated"
