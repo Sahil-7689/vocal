@@ -4,26 +4,26 @@ import { Organization, OrgMember, Workflow, WorkflowRun, StepRun, OrgRole } from
 export const MOCK_USERS = [
   {
     id: "user-owner-1",
-    email: "sahil@vocalflow.ai",
-    displayName: "Sahil Kumar (Owner)",
+    email: "demo.owner.a@vocalflow-demo.com",
+    displayName: "Acme Owner (Org A)",
     avatarUrl: "https://lh3.googleusercontent.com/aida-public/AB6AXuAgUOWPRl4hPJHYJWTEN_JRLqX7fzef49-fL6e7379DWcW-Dn95yblqDMqeBosJByRtoLf738LVO5VEIJl6nErwbsJwDO3oDVwdtHsfnk-wDPy3UU1T5brK-BGWmNAx3qhC5NAlMeVMZCJHiXsjDxmqtw4-3AnUIQPKmEuvAIiS5fLY3HalIuCuUP-NY2NBC-PjU_C8w1b6FZXkaHmlhAbsFUfji2uCoOeYWRZRUGrm7ZeC3Gs3uzAaKA",
   },
   {
     id: "user-editor-1",
-    email: "editor@vocalflow.ai",
-    displayName: "Alex Rivera (Editor)",
+    email: "demo.editor.a@vocalflow-demo.com",
+    displayName: "Acme Editor (Org A)",
     avatarUrl: "https://lh3.googleusercontent.com/aida-public/AB6AXuARJ-R7hKbFoHQYovg9pZZFluLuYklzk1FKft4vZ9Wd6XuHQo8E5KpuCaKsSaLVCpqXw3KOvllCFuUKcPhBUMdUr5TlMOxKmtBtZZnmU-9v1Vxy0TQxhsTjzVCKO_uk0pk1knRclu0Ol6yozusSYvLwEnQbnfrXDSd4JaNhbuV52riy2L43nBPliPSR9xCqLnhiHiwlV3lEdsHf_Y8AwG5bOTokmLbSGdzL7n8fW0ly7vjcg2Ycc6DuLA",
   },
   {
     id: "user-viewer-1",
-    email: "viewer@vocalflow.ai",
-    displayName: "Jordan Lee (Viewer)",
+    email: "demo.viewer.a@vocalflow-demo.com",
+    displayName: "Acme Viewer (Org A)",
     avatarUrl: "https://lh3.googleusercontent.com/aida-public/AB6AXuBVhqI5nmHtTb-MVAJP3njevTwPfM5mFllA6VLvGlgvrD1PQ20SYXc7qgvct4UfrdY-Id2jQMwzBaggtvUKdytsl50U9GzkWnaQPONN5OVXhaIslOD4_P6XaSa_e1z6iGOVcM59otpDRhU2U0VGZWuS3Bw3uWd1aqNKaC7c08vQE6hOxOalc0cXHSM6NuG3UqfVZ6OXmhAidF5rlGPxifDLw38baSx8p37wrvBRy3A3fcTtQEoZ2G85Xg",
   },
   {
     id: "user-orgb-1",
-    email: "cyberdyne@orgb.ai",
-    displayName: "Miles Dyson (Org B)",
+    email: "demo.owner.b@vocalflow-demo.com",
+    displayName: "Beta Owner (Org B)",
     avatarUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
   },
 ];
